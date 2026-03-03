@@ -103,7 +103,7 @@ async function uploadToTencentCOS(
   config: OSSConfig
 ): Promise<string> {
   // 后端 API 地址
-  const API_BASE_URL = 'http://localhost:3001';
+  const API_BASE_URL = 'http://localhost:3002';
 
   // 🔧 确保文件扩展名与 blob 类型一致
   // PNG 转换后，blob.type 是 'image/png'，确保文件名也是 .png
@@ -524,6 +524,69 @@ export async function testOSSConnection(
       success: false,
       error: error.message || '未知错误'
     };
+  }
+}
+
+/**
+ * 本地文件上传（OSS 未配置时的降级方案）
+ * 将文件上传到本地服务端，返回 localhost URL
+ *
+ * @param file - 文件 Blob 或 base64/URL 字符串
+ * @param fileName - 文件名
+ * @param projectId - 项目 ID
+ * @param episodeId - 剧集节点 ID（可选，默认 "default"）
+ * @param type - 文件类型 "image" 或 "video"（默认 "image"）
+ */
+export async function uploadToLocal(
+  file: Blob | string,
+  fileName: string,
+  projectId: string = 'default',
+  episodeId: string = 'default',
+  type: 'image' | 'video' = 'image'
+): Promise<string> {
+  const API_BASE_URL = 'http://localhost:3002';
+
+  // 将 string 转为 Blob
+  let blob: Blob;
+  if (typeof file === 'string') {
+    const response = await fetch(file);
+    blob = await response.blob();
+  } else {
+    blob = file;
+  }
+
+  // 确保文件名扩展名正确
+  let finalFileName = fileName;
+  if (blob.type === 'image/png' && !fileName.toLowerCase().endsWith('.png')) {
+    finalFileName = fileName.replace(/\.[^.]+$/, '.png');
+  }
+
+  const formData = new FormData();
+  formData.append('file', blob, finalFileName);
+  formData.append('projectId', projectId);
+  formData.append('episodeId', episodeId);
+  formData.append('type', type);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/upload-local`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(errorData.error || `本地上传失败: ${response.status}`);
+    }
+
+    const result = await response.json();
+    if (!result.success) {
+      throw new Error(result.error || '本地上传失败');
+    }
+
+    console.log('[OSSService] 本地上传成功:', result.url);
+    return result.url;
+  } catch (error: any) {
+    throw new Error(`本地文件上传失败: ${error.message}`);
   }
 }
 

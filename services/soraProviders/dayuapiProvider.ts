@@ -101,7 +101,7 @@ export class DayuapiProvider implements SoraProvider {
       'dayuapiSubmitTask',
       async () => {
         // 使用后端代理
-        const apiUrl = 'http://localhost:3001/api/dayuapi/create';
+        const apiUrl = 'http://localhost:3002/api/dayuapi/create';
         const response = await fetch(apiUrl, {
           method: 'POST',
           headers: {
@@ -154,7 +154,7 @@ export class DayuapiProvider implements SoraProvider {
       'dayuapiCheckStatus',
       async () => {
         // 使用后端代理
-        const apiUrl = `http://localhost:3001/api/dayuapi/query?id=${encodeURIComponent(taskId)}`;
+        const apiUrl = `http://localhost:3002/api/dayuapi/query?id=${encodeURIComponent(taskId)}`;
         const response = await fetch(apiUrl, {
           method: 'GET',
           headers: {
@@ -202,7 +202,7 @@ export class DayuapiProvider implements SoraProvider {
         if (status === 'completed' && !videoUrl) {
 
           try {
-            const contentResponse = await fetch(`http://localhost:3001/api/dayuapi/content?id=${data.id}`, {
+            const contentResponse = await fetch(`http://localhost:3002/api/dayuapi/content?id=${data.id}`, {
               method: 'GET',
               headers: {
                 'X-API-Key': apiKey,

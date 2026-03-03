@@ -218,6 +218,7 @@ export interface AppNode {
     analysis?: string; // Video analysis result
     error?: string;
     progress?: number;
+    statusMessage?: string;
     aspectRatio?: string; // e.g., '16:9', '4:3'
     resolution?: string; // e.g., '1080p', '4k'
     duration?: number; // Duration in seconds (for Audio/Video)
@@ -419,6 +420,7 @@ export interface Workflow {
   nodes: AppNode[];
   connections: Connection[];
   groups: Group[];
+  projectId?: string; // 后端项目 ID，用于持久化同步
 }
 
 // New Smart Sequence Types
@@ -587,6 +589,7 @@ export interface StoryboardVideoGeneratorData {
   // 生成结果
   currentTaskId?: string;
   progress?: number;
+  statusMessage?: string;
   error?: string;
 
   // 子节点列表

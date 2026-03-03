@@ -13,10 +13,10 @@ import { useLanguage } from './src/i18n/LanguageContext';
 import { Node } from './components/Node';
 import { SidebarDock } from './components/SidebarDock';
 import { ModelFallbackNotification } from './components/ModelFallbackNotification';
-import { AppNode, NodeType, NodeStatus, Connection, ContextMenuState, Group, Workflow, SmartSequenceItem, CharacterProfile, SoraTaskGroup } from './types';
+import { NotificationToast } from './components/NotificationToast';
+import { AppNode, NodeType, NodeStatus, ContextMenuState, Workflow, SmartSequenceItem, CharacterProfile, SoraTaskGroup } from './types';
 // AI 服务层：动态导入（首次调用时加载，减少首屏 ~107KB gzip ~36KB）
 // 详见 ./services/lazyServices.ts
-import { saveToStorage, loadFromStorage } from './services/storage_old';
 import { getUserPriority, ModelCategory, getDefaultModel, getUserDefaultModel } from './services/modelConfig';
 import { getGridConfig, STORYBOARD_RESOLUTIONS } from './services/storyboardConfig';
 import { saveImageNodeOutput, saveVideoNodeOutput, saveAudioNodeOutput, saveStoryboardGridOutput } from './utils/storageHelper';
@@ -37,9 +37,10 @@ import { useWindowSize } from './hooks/useWindowSize';
 import { useUIStore } from './stores/ui.store';
 import { useEditorStore } from './stores/editor.store';
 import { getProjects, getProject, createProject, isApiAvailable } from './services/api';
-import { initSync, setSyncProjectId, getSyncProjectId, createStoreSubscription, syncFullSnapshot, setOnlineStatus } from './services/syncMiddleware';
+import { initSync, setSyncProjectId, setOnlineStatus } from './services/syncMiddleware';
 import { useNodeActions } from './handlers/useNodeActions';
 import { useWorkflowActions } from './handlers/useWorkflowActions';
+import { uploadMediaToServer } from './services/mediaStorageService';
 import { useKeyboardShortcuts } from './handlers/useKeyboardShortcuts';
 
 // Lazy load large components
@@ -56,7 +57,7 @@ const DebugPanel = lazy(() => import('./components/DebugPanel').then(m => ({ def
 import {
     Plus, Copy, Trash2, Type, Image as ImageIcon, Video as VideoIcon,
     ScanFace, Brush, MousePointerClick, LayoutTemplate, X, Film, Link, RefreshCw, Upload,
-    Minus, FolderHeart, Unplug, Sparkles, ChevronLeft, ChevronRight, Scan, Music, Mic2, Loader2, ScrollText, Clapperboard, User, BookOpen, Languages, HardDrive
+    Minus, FolderHeart, Unplug, Sparkles, ChevronLeft, ChevronRight, Scan, Music, Mic2, Loader2, ScrollText, Clapperboard, User, BookOpen, Languages, HardDrive, Save
 } from 'lucide-react';
 import { ExpandedView } from './components/ExpandedView';
 import type { InputAsset } from './components/nodes/types';
@@ -126,7 +127,7 @@ export const App = () => {
     workflows, setWorkflows,
     assetHistory, setAssetHistory,
     selectedWorkflowId, setSelectedWorkflowId,
-    isLoaded, setIsLoaded,
+    isLoaded, setIsLoaded, isLoadingWorkflow,
     nodes, setNodes,
     connections, setConnections,
     groups, setGroups,
@@ -239,7 +240,6 @@ export const App = () => {
 
       const loadData = async () => {
           try {
-            // 尝试从 PostgreSQL 加载
             const apiOnline = await initSync();
 
             if (apiOnline) {
@@ -247,97 +247,64 @@ export const App = () => {
               let projectId: string | null = null;
 
               if (projectsRes.success && projectsRes.data && projectsRes.data.length > 0) {
-                // 加载最近的项目
+                // 从数据库项目列表构建工作流列表
+                const dbWorkflows: Workflow[] = projectsRes.data.map((p: any) => ({
+                  id: `wf-db-${p.id}`,
+                  title: p.title,
+                  thumbnail: '',
+                  nodes: [],
+                  connections: [],
+                  groups: [],
+                  projectId: p.id,
+                }));
+                setWorkflows(dbWorkflows);
                 projectId = projectsRes.data[0].id;
               } else {
                 // 没有项目，创建默认项目
                 const createRes = await createProject('默认项目');
                 if (createRes.success && createRes.data) {
                   projectId = createRes.data.id;
+                  setWorkflows([{
+                    id: `wf-db-${projectId}`,
+                    title: '默认项目',
+                    thumbnail: '',
+                    nodes: [], connections: [], groups: [],
+                    projectId,
+                  }]);
                 }
               }
 
               if (projectId) {
                 setSyncProjectId(projectId);
+                setOnlineStatus(true);
                 const projectRes = await getProject(projectId);
                 if (projectRes.success && projectRes.data) {
                   const { nodes: dbNodes, connections: dbConns, groups: dbGroups } = projectRes.data;
-
                   if (dbNodes && dbNodes.length > 0) {
-                    // 从 PostgreSQL 加载成功
                     const mappedNodes = dbNodes.map((n: any) => {
                       let data = n.data || {};
-                      if (typeof data === 'string') {
-                        try { data = JSON.parse(data); } catch { data = {}; }
-                      }
-                      return { ...n, data, inputs: n.inputs || [], title: getNodeNameCN(n.type) };
+                      if (typeof data === 'string') { try { data = JSON.parse(data); } catch { data = {}; } }
+                      let inputs = n.inputs || [];
+                      if (typeof inputs === 'string') { try { inputs = JSON.parse(inputs); } catch { inputs = []; } }
+                      return { ...n, data, inputs, title: getNodeNameCN(n.type) };
                     });
-                    // 兼容旧数据：标记 SCRIPT_EPISODE 的子节点为 isEpisodeChild
                     const mappedConns = (dbConns || []).map((c: any) => ({
-                      id: c.id,
-                      from: c.from_node || c.from,
-                      to: c.to_node || c.to,
+                      id: c.id, from: c.from_node || c.from, to: c.to_node || c.to,
                     }));
-                    const nodeMap = new Map(mappedNodes.map((n: any) => [n.id, n]));
-                    const episodeChildIds = new Set(
-                      mappedConns
-                        .filter((c: any) => nodeMap.get(c.from)?.type === NodeType.SCRIPT_EPISODE)
-                        .map((c: any) => c.to)
-                    );
-                    const migratedNodes = mappedNodes.map((n: any) =>
-                      n.type === NodeType.PROMPT_INPUT && episodeChildIds.has(n.id) && !n.data.isEpisodeChild
-                        ? { ...n, data: { ...n.data, isEpisodeChild: true } }
-                        : n
-                    );
-                    setNodes(migratedNodes);
+                    setNodes(mappedNodes);
                     setConnections(mappedConns);
                     setGroups(dbGroups || []);
-
-                    // 仍然加载 assets 和 workflows 从 IndexedDB（这些不在 PostgreSQL 中）
-                    const sAssets = await loadFromStorage<any[]>('assets'); if (sAssets) setAssetHistory(sAssets);
-                    const sWfs = await loadFromStorage<Workflow[]>('workflows'); if (sWfs) setWorkflows(sWfs);
-
-                    setOnlineStatus(true);
-                    return; // 成功从 PostgreSQL 加载
                   }
+                  // 数据库项目为空时画布也为空（这是正确的）
                 }
               }
-            }
-
-            // Fallback: 从 IndexedDB 加载
-            setOnlineStatus(false);
-            const sAssets = await loadFromStorage<any[]>('assets'); if (sAssets) setAssetHistory(sAssets);
-            const sWfs = await loadFromStorage<Workflow[]>('workflows'); if (sWfs) setWorkflows(sWfs);
-            let sNodes = await loadFromStorage<AppNode[]>('nodes');
-            const sConns = await loadFromStorage<Connection[]>('connections');
-            if (sNodes) {
-              // 兼容旧数据：标记 SCRIPT_EPISODE 的子节点为 isEpisodeChild
-              const episodeChildIds = new Set(
-                (sConns || [])
-                  .filter(c => sNodes!.find(n => n.id === c.from)?.type === NodeType.SCRIPT_EPISODE)
-                  .map(c => c.to)
-              );
-              sNodes = sNodes.map(node => ({
-                ...node,
-                title: getNodeNameCN(node.type),
-                ...(node.type === NodeType.PROMPT_INPUT && episodeChildIds.has(node.id) && !node.data.isEpisodeChild
-                  ? { data: { ...node.data, isEpisodeChild: true } }
-                  : {}),
-              }));
-              setNodes(sNodes);
-            }
-            if (sConns) setConnections(sConns);
-            const sGroups = await loadFromStorage<Group[]>('groups'); if (sGroups) setGroups(sGroups);
-
-            // 如果 API 在线但项目为空，上传本地数据作为初始快照
-            if (apiOnline && getSyncProjectId()) {
-              const state = useEditorStore.getState();
-              if (state.nodes.length > 0) {
-                syncFullSnapshot(state.nodes, state.connections, state.groups);
-              }
+            } else {
+              // 后端不可达，空画布
+              setOnlineStatus(false);
+              console.warn('[App] 后端不可达，画布为空');
             }
           } catch (e) {
-            console.error("Failed to load storage", e);
+            console.error("Failed to load from database", e);
           } finally {
             setIsLoaded(true);
           }
@@ -556,21 +523,6 @@ export const App = () => {
     return () => clearTimeout(timeoutId);
   }, [isLoaded]); // 移除 nodes 依赖，避免循环触发
 
-  useEffect(() => {
-      if (!isLoaded) return;
-      saveToStorage('assets', assetHistory);
-      saveToStorage('workflows', workflows);
-      saveToStorage('nodes', nodes);
-      saveToStorage('connections', connections);
-      saveToStorage('groups', groups);
-  }, [assetHistory, workflows, nodes, connections, groups, isLoaded]);
-
-  // PostgreSQL 自动同步：订阅 store 变更
-  useEffect(() => {
-      if (!isLoaded) return;
-      const unsubscribe = createStoreSubscription(useEditorStore);
-      return () => unsubscribe();
-  }, [isLoaded]);
 
   const getNodeNameCN = (type: string) => {
       switch(type) {
@@ -821,24 +773,22 @@ export const App = () => {
   };
 
   const handleWheel = useCallback((e: WheelEvent) => {
-      // 检查事件目标是否在节点内
+      // 如果滚轮事件发生在节点内部，不处理（让节点自己滚动）
       const target = e.target as HTMLElement;
       const nodeElement = target.closest('[data-node-container]');
       if (nodeElement) {
-        // 事件发生在节点内，不移动画布
         return;
       }
 
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        const delta = -e.deltaY * 0.001;
-        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        canvas.zoomCanvas(delta, x, y);
-      } else {
-        canvas.setPan(p => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
-      }
+      // 阻止浏览器默认行为（如页面缩放）
+      e.preventDefault();
+
+      // 滚轮直接缩放画布，以鼠标位置为中心点
+      const delta = -e.deltaY * 0.001;
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      canvas.zoomCanvas(delta, x, y);
   }, [canvas]);
 
   // 手动添加非被动的 wheel 事件监听器（避免 preventDefault 警告）
@@ -863,55 +813,28 @@ export const App = () => {
       if (contextMenu) setContextMenu(null);
       setSelectedGroupId(null);
 
-      // Middle click or Shift+Left click for immediate drag
-      if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+      // 左键点击空白画布：直接拖拽画布
+      // 中键点击：也拖拽画布（保留兼容）
+      if (e.button === 0 || e.button === 1) {
+          // Shift+左键：框选模式
+          if (e.button === 0 && e.shiftKey) {
+              if (e.detail > 1) { e.preventDefault(); return; }
+              setSelectedNodeIds([]);
+              const rect = { startX: e.clientX, startY: e.clientY, currentX: e.clientX, currentY: e.clientY };
+              setSelectionRect(rect);
+              selectionRectRef.current = rect;
+              return;
+          }
+
+          // 左键 / 中键：直接开始拖拽画布
+          setSelectedNodeIds([]);
           canvas.startCanvasDrag(e.clientX, e.clientY);
           return;
-      }
-
-      // Left click on canvas
-      if (e.button === 0 && !e.shiftKey) {
-          if (e.detail > 1) { e.preventDefault(); return; }
-
-          // Clear selection
-          setSelectedNodeIds([]);
-
-          // Start selection rect
-          const rect = { startX: e.clientX, startY: e.clientY, currentX: e.clientX, currentY: e.clientY };
-          setSelectionRect(rect);
-          selectionRectRef.current = rect;
-
-          // Setup long press detection (300ms)
-          longPressStartPosRef.current = { x: e.clientX, y: e.clientY };
-          isLongPressDraggingRef.current = false;
-
-          longPressTimerRef.current = setTimeout(() => {
-              // Long press detected - start canvas drag
-              if (longPressStartPosRef.current) {
-                  isLongPressDraggingRef.current = true;
-                  setSelectionRect(null); // Cancel selection rect
-                  selectionRectRef.current = null;
-                  canvas.startCanvasDrag(longPressStartPosRef.current.x, longPressStartPosRef.current.y);
-              }
-          }, 300);
       }
   }, [contextMenu, canvas]);
 
   const handleGlobalMouseMove = useCallback((e: MouseEvent) => {
       const { clientX, clientY } = e;
-
-      // Cancel long press if mouse moves more than 5px
-      if (longPressTimerRef.current && longPressStartPosRef.current && !isLongPressDraggingRef.current) {
-          const dx = clientX - longPressStartPosRef.current.x;
-          const dy = clientY - longPressStartPosRef.current.y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          if (distance > 5) {
-              // Mouse moved too much, cancel long press and allow selection rect
-              clearTimeout(longPressTimerRef.current);
-              longPressTimerRef.current = null;
-              longPressStartPosRef.current = null;
-          }
-      }
 
       if (rafRef.current) return;
       rafRef.current = requestAnimationFrame(() => {
@@ -1120,10 +1043,11 @@ export const App = () => {
       const targetId = replacementTargetRef.current;
       if (file && targetId) {
           const reader = new FileReader();
-          reader.onload = (e) => {
-              const result = e.target?.result as string;
-              if (type === 'image') handleNodeUpdate(targetId, { image: result });
-              else handleNodeUpdate(targetId, { videoUri: result });
+          reader.onload = async (ev) => {
+              const base64 = ev.target?.result as string;
+              const url = await uploadMediaToServer(base64, { nodeId: targetId, type });
+              if (type === 'image') handleNodeUpdate(targetId, { image: url });
+              else handleNodeUpdate(targetId, { videoUri: url });
           };
           reader.readAsDataURL(file);
       }
@@ -1468,7 +1392,7 @@ export const App = () => {
   });
 
   // --- Workflow Actions (extracted to handlers/useWorkflowActions.ts) ---
-  const { saveCurrentAsWorkflow, saveGroupAsWorkflow, loadWorkflow, deleteWorkflow, renameWorkflow } = useWorkflowActions({
+  const { saveCurrentAsWorkflow, saveGroupAsWorkflow, loadWorkflow, deleteWorkflow, renameWorkflow, createNewWorkflow } = useWorkflowActions({
     saveHistory,
   });
 
@@ -1578,6 +1502,16 @@ export const App = () => {
 
           {/* Welcome Screen Component */}
           <WelcomeScreen visible={nodes.length === 0} />
+
+          {/* 加载工作流时的 loading 遮罩 */}
+          {isLoadingWorkflow && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+              <div className="flex flex-col items-center gap-3">
+                <Loader2 size={36} className="animate-spin text-white/70" />
+                <span className="text-sm text-white/60">加载工作流中...</span>
+              </div>
+            </div>
+          )}
 
           {/* Canvas Logo - Fixed at top-left, hidden when showing welcome screen */}
           {nodes.length > 0 && (
@@ -1813,7 +1747,7 @@ export const App = () => {
           
           {croppingNodeId && imageToCrop && (
             <Suspense fallback={<div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50"><Loader2 size={48} className="animate-spin text-cyan-400" /></div>}>
-              <ImageCropper imageSrc={imageToCrop} onCancel={() => {setCroppingNodeId(null); setImageToCrop(null);}} onConfirm={(b) => {handleNodeUpdate(croppingNodeId, {croppedFrame: b}); setCroppingNodeId(null); setImageToCrop(null);}} />
+              <ImageCropper imageSrc={imageToCrop} onCancel={() => {setCroppingNodeId(null); setImageToCrop(null);}} onConfirm={async (b) => {const url = await uploadMediaToServer(b, { nodeId: croppingNodeId, type: 'image' }); handleNodeUpdate(croppingNodeId, {croppedFrame: url}); setCroppingNodeId(null); setImageToCrop(null);}} />
             </Suspense>
           )}
           <ExpandedView media={expandedMedia} onClose={() => setExpandedMedia(null)} />
@@ -1885,6 +1819,7 @@ export const App = () => {
 
           {/* 模型降级通知 */}
           <ModelFallbackNotification />
+          <NotificationToast />
 
           <SidebarDock
               onAddNode={addNode}
@@ -1906,6 +1841,7 @@ export const App = () => {
               selectedWorkflowId={selectedWorkflowId}
               onSelectWorkflow={loadWorkflow}
               onSaveWorkflow={saveCurrentAsWorkflow}
+              onNewWorkflow={createNewWorkflow}
               onDeleteWorkflow={deleteWorkflow}
               onRenameWorkflow={renameWorkflow}
               onOpenSettings={() => setIsSettingsOpen(true)}
@@ -1936,16 +1872,26 @@ export const App = () => {
                       <span className="text-xs font-medium">重连存储</span>
                   </button>
               )}
-              {/* 翻译按钮 - 只在进入画布后显示 */}
+              {/* 保存按钮 + 翻译按钮 - 只在进入画布后显示 */}
               {nodes.length > 0 && (
-                  <button
-                      onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
-                      className="flex items-center gap-2 px-4 py-2 bg-[#1c1c1e]/80 backdrop-blur-2xl border border-white/10 rounded-full shadow-2xl text-slate-300 hover:text-white hover:border-white/20 transition-all hover:scale-105"
-                      title={t.settings.language}
-                  >
-                      <Languages size={16} />
-                      <span className="text-xs font-medium">{language === 'zh' ? t.settings.english : t.settings.chinese}</span>
-                  </button>
+                  <>
+                      <button
+                          onClick={saveCurrentAsWorkflow}
+                          className="flex items-center gap-2 px-4 py-2 bg-[#1c1c1e]/80 backdrop-blur-2xl border border-white/10 rounded-full shadow-2xl text-slate-300 hover:text-white hover:border-white/20 transition-all hover:scale-105"
+                          title="保存当前工作流"
+                      >
+                          <Save size={16} />
+                          <span className="text-xs font-medium">保存</span>
+                      </button>
+                      <button
+                          onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
+                          className="flex items-center gap-2 px-4 py-2 bg-[#1c1c1e]/80 backdrop-blur-2xl border border-white/10 rounded-full shadow-2xl text-slate-300 hover:text-white hover:border-white/20 transition-all hover:scale-105"
+                          title={t.settings.language}
+                      >
+                          <Languages size={16} />
+                          <span className="text-xs font-medium">{language === 'zh' ? t.settings.english : t.settings.chinese}</span>
+                      </button>
+                  </>
               )}
           </div>
 

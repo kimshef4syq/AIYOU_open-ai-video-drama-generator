@@ -36,7 +36,7 @@ interface ModelConfiguration {
  */
 export async function loadModelConfig(): Promise<ModelConfiguration> {
   try {
-    const response = await fetch('http://localhost:3001/api/admin/config');
+    const response = await fetch('http://localhost:3002/api/admin/config');
     if (!response.ok) {
       throw new Error(`Failed to load config: ${response.status}`);
     }

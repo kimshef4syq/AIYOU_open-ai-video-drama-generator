@@ -184,13 +184,30 @@ export function saveSoraStorageConfig(config: SoraStorageConfig): void {
 
 /**
  * 获取 OSS 配置
+ * 如果配置的提供商 API Key 为空，返回 null（触发本地存储降级）
  */
 export function getOSSConfig(): OSSConfig | null {
   const stored = localStorage.getItem(OSS_CONFIG_KEY);
   if (!stored) return null;
 
   try {
-    return JSON.parse(stored);
+    const config: OSSConfig = JSON.parse(stored);
+
+    // 校验 API Key 有效性，空 key 视为未配置
+    if (config.provider === 'imgbb') {
+      const apiKey = config.imgbbApiKey || config.accessKey;
+      if (!apiKey || apiKey.trim() === '') {
+        console.warn('[SoraConfig] ImgBB API Key 为空，降级为本地存储');
+        return null;
+      }
+    } else if (config.provider === 'tencent' || config.provider === 'aliyun') {
+      if (!config.accessKey || !config.secretKey || !config.bucket || !config.region) {
+        console.warn(`[SoraConfig] ${config.provider} 配置不完整，降级为本地存储`);
+        return null;
+      }
+    }
+
+    return config;
   } catch (e) {
     console.error('Failed to parse OSS config:', e);
     return null;

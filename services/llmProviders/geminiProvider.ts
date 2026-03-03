@@ -4,7 +4,7 @@
  */
 
 import { GoogleGenAI } from '@google/genai';
-import { LLMProvider, GenerateImageOptions, GenerateContentOptions } from './baseProvider';
+import { LLMProvider, GenerateImageOptions, GenerateContentOptions, imageToBase64 } from './baseProvider';
 import { LLMProviderType } from '../../types';
 import { logAPICall } from '../apiLogger';
 
@@ -92,14 +92,12 @@ export class GeminiProvider implements LLMProvider {
     // 构建请求内容
     const parts: any[] = [{ text: prompt }];
 
-    // 添加参考图片
+    // 添加参考图片（支持 Base64 和 URL）
     if (referenceImages && referenceImages.length > 0) {
-      for (const imageBase64 of referenceImages) {
+      for (const imageRef of referenceImages) {
+        const { data, mimeType } = await imageToBase64(imageRef);
         parts.push({
-          inlineData: {
-            data: imageBase64.split(',')[1] || imageBase64,
-            mimeType: 'image/jpeg'
-          }
+          inlineData: { data, mimeType }
         });
       }
     }

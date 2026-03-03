@@ -8,8 +8,9 @@ import { BaseNodeService, NodeExecutionContext, NodeExecutionResult } from './ba
 import { promptBuilderFactory } from '../promptBuilders';
 import { generateVideoFromStoryboard } from '../videoGenerationService';
 import { fuseStoryboardWithCharacterViews } from '../../utils/imageFusion';
-import { uploadFileToOSS } from '../ossService';
+import { uploadFileToOSS, uploadToLocal } from '../ossService';
 import { getOSSConfig, getVideoPlatformApiKey } from '../soraConfigService';
+import { getSyncProjectId } from '../syncMiddleware';
 import { VideoModelType } from '../videoPlatforms';
 
 /**
@@ -221,19 +222,24 @@ export class StoryboardVideoGeneratorNodeService extends BaseNodeService {
       } as StoryboardVideoGeneratorData, context);
 
       const ossConfig = getOSSConfig();
+      const fileName = `storyboard-${node.id}-${Date.now()}.png`;
+
       if (ossConfig) {
-        const fileName = `storyboard-${node.id}-${Date.now()}.png`;
+        // OSS 已配置且 key 有效，上传到云端
         referenceImageUrl = await uploadFileToOSS(fusedImage, fileName, ossConfig);
-
-        this.updateNodeData(node.id, {
-          ...data,
-          fusedImageUrl: referenceImageUrl,
-          progress: 20,
-        } as StoryboardVideoGeneratorData, context);
-
       } else {
-        referenceImageUrl = fusedImage;
+        // OSS 未配置，降级为本地存储
+        const projectId = getSyncProjectId() || 'default';
+        const episodeNode = this.findUpstreamNode(context, node.id, NodeType.SCRIPT_EPISODE);
+        const episodeId = episodeNode?.id || 'default';
+        referenceImageUrl = await uploadToLocal(fusedImage, fileName, projectId, episodeId, 'image');
       }
+
+      this.updateNodeData(node.id, {
+        ...data,
+        fusedImageUrl: referenceImageUrl,
+        progress: 20,
+      } as StoryboardVideoGeneratorData, context);
     }
 
     // 3. 生成视频
@@ -267,6 +273,7 @@ export class StoryboardVideoGeneratorNodeService extends BaseNodeService {
           this.updateNodeData(node.id, {
             ...data,
             progress: adjustedProgress,
+            statusMessage: message,
           } as StoryboardVideoGeneratorData, context);
         }
       }

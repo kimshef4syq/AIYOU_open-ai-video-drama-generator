@@ -19,6 +19,7 @@ interface EditorState {
   // Selection & workflow
   selectedWorkflowId: string | null;
   isLoaded: boolean;
+  isLoadingWorkflow: boolean;
   clipboard: AppNode | null;
   selectedNodeIds: string[];
   selectedGroupId: string | null;
@@ -50,6 +51,7 @@ interface EditorState {
   // Actions - selection & workflow
   setSelectedWorkflowId: (v: string | null) => void;
   setIsLoaded: (v: boolean) => void;
+  setIsLoadingWorkflow: (v: boolean) => void;
   setClipboard: (v: AppNode | null) => void;
   setSelectedNodeIds: (v: string[] | ((prev: string[]) => string[])) => void;
   setSelectedGroupId: (v: string | null) => void;
@@ -82,6 +84,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   // Initial values - selection & workflow
   selectedWorkflowId: null,
   isLoaded: false,
+  isLoadingWorkflow: false,
   clipboard: null,
   selectedNodeIds: [],
   selectedGroupId: null,
@@ -128,6 +131,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   // Actions - selection & workflow
   setSelectedWorkflowId: (v) => set({ selectedWorkflowId: v }),
   setIsLoaded: (v) => set({ isLoaded: v }),
+  setIsLoadingWorkflow: (v) => set({ isLoadingWorkflow: v }),
   setClipboard: (v) => set({ clipboard: v }),
   setSelectedNodeIds: (v) => set((state) => ({
     selectedNodeIds: typeof v === 'function' ? v(state.selectedNodeIds) : v,

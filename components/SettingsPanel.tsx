@@ -29,6 +29,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = React.memo(({ isOpen,
   const [customApiKey, setCustomApiKey] = useState('');
   const [showCustomApiKey, setShowCustomApiKey] = useState(false);
 
+  // 云雾模型列表
+  const [yunwuModels, setYunwuModels] = useState<string[]>([]);
+  const [yunwuDefaultModel, setYunwuDefaultModel] = useState('');
+  const [isFetchingModels, setIsFetchingModels] = useState(false);
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -43,6 +48,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = React.memo(({ isOpen,
 
     const savedYunwuLlmKey = localStorage.getItem('YUNWU_API_KEY');
     if (savedYunwuLlmKey) setYunwuLlmApiKey(savedYunwuLlmKey);
+
+    const savedYunwuDefaultModel = localStorage.getItem('YUNWU_DEFAULT_MODEL');
+    if (savedYunwuDefaultModel) setYunwuDefaultModel(savedYunwuDefaultModel);
+
+    const savedYunwuModels = localStorage.getItem('YUNWU_MODELS');
+    if (savedYunwuModels) {
+      try { setYunwuModels(JSON.parse(savedYunwuModels)); } catch {}
+    }
 
     const savedCustomApiUrl = localStorage.getItem('CUSTOM_API_URL');
     if (savedCustomApiUrl) setCustomApiUrl(savedCustomApiUrl);
@@ -158,6 +171,70 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = React.memo(({ isOpen,
     window.dispatchEvent(new CustomEvent('llmProviderUpdated'));
   };
 
+  const fetchYunwuModels = async () => {
+    const key = yunwuLlmApiKey.trim();
+    if (!key) {
+      setErrorMessage('请先输入云雾 API Key');
+      return;
+    }
+    setIsFetchingModels(true);
+    try {
+      let models: string[] = [];
+
+      if (llmProvider === 'yunwu') {
+        // 云雾用 OpenAI 兼容端点获取完整模型列表（600+）
+        // /v1beta/models 只返回 ~48 个 Gemini 兼容模型
+        const response = await fetch('https://yunwu.ai/v1/models', {
+          headers: { 'Authorization': `Bearer ${key}` }
+        });
+        if (!response.ok) {
+          setErrorMessage('获取模型列表失败，请检查 API Key');
+          return;
+        }
+        const data = await response.json();
+        models = (data.data || [])
+          .map((m: any) => m.id || '')
+          .filter((name: string) => name.length > 0)
+          .sort();
+      } else {
+        // Gemini / 自定义：用 /v1beta/models 分页获取
+        const allModels: any[] = [];
+        let pageToken: string | undefined;
+        const baseUrl = llmProvider === 'gemini'
+          ? `https://generativelanguage.googleapis.com/v1beta/models`
+          : `${customApiUrl.trim().replace(/\/+$/, '')}/v1beta/models`;
+
+        do {
+          const url = `${baseUrl}?key=${key}&pageSize=100${pageToken ? `&pageToken=${pageToken}` : ''}`;
+          const response = await fetch(url);
+          if (!response.ok) {
+            setErrorMessage('获取模型列表失败，请检查 API Key');
+            return;
+          }
+          const data = await response.json();
+          allModels.push(...(data.models || []));
+          pageToken = data.nextPageToken;
+        } while (pageToken);
+
+        models = allModels
+          .map((m: any) => (m.name || '').replace(/^models\//, ''))
+          .filter((name: string) => name.length > 0)
+          .sort();
+      }
+
+      setYunwuModels(models);
+      localStorage.setItem('YUNWU_MODELS', JSON.stringify(models));
+      if (!yunwuDefaultModel && models.length > 0) {
+        setYunwuDefaultModel(models[0]);
+        localStorage.setItem('YUNWU_DEFAULT_MODEL', models[0]);
+      }
+    } catch {
+      setErrorMessage('网络错误，无法获取模型列表');
+    } finally {
+      setIsFetchingModels(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -198,7 +275,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = React.memo(({ isOpen,
         <div className="relative flex border-b border-white/10">
           {[
             { key: 'basic' as const, label: '基础设置', activeColor: 'text-cyan-400 border-cyan-400' },
-            { key: 'models' as const, label: '模型优先级', activeColor: 'text-cyan-400 border-cyan-400' },
+            { key: 'models' as const, label: '默认模型', activeColor: 'text-cyan-400 border-cyan-400' },
             { key: 'sora' as const, label: 'Sora 2', activeColor: 'text-green-400 border-green-400' },
             { key: 'storage' as const, label: '存储设置', activeColor: 'text-cyan-400 border-cyan-400' },
           ].map(tab => (
@@ -337,6 +414,40 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = React.memo(({ isOpen,
                         {showYunwuLlmApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
                       </button>
                     </div>
+                    {/* 可用模型列表 */}
+                    <div className="mt-3">
+                      <label className="block text-xs text-slate-400 mb-1.5">可用模型</label>
+                      <div className="flex gap-2">
+                        <select
+                          value={yunwuDefaultModel}
+                          onChange={(e) => {
+                            setYunwuDefaultModel(e.target.value);
+                            localStorage.setItem('YUNWU_DEFAULT_MODEL', e.target.value);
+                          }}
+                          className="flex-1 px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-purple-500/50 focus:bg-white/10 transition-all appearance-none cursor-pointer"
+                        >
+                          {yunwuModels.length === 0 && (
+                            <option value="" className="bg-[#1a1a2e]">点击右侧按钮获取模型列表</option>
+                          )}
+                          {yunwuModels.map((model) => (
+                            <option key={model} value={model} className="bg-[#1a1a2e]">{model}</option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={fetchYunwuModels}
+                          disabled={isFetchingModels || !yunwuLlmApiKey.trim()}
+                          className="px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                          title="获取模型列表"
+                          type="button"
+                        >
+                          <RefreshCw size={16} className={isFetchingModels ? 'animate-spin' : ''} />
+                        </button>
+                      </div>
+                      {yunwuModels.length > 0 && (
+                        <p className="text-xs text-slate-500 mt-1">共 {yunwuModels.length} 个可用模型</p>
+                      )}
+                    </div>
+
                     <div className="text-xs text-slate-400 space-y-1">
                       <p>• 访问 <a href="https://yunwu.ai" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">云雾官网</a> 获取 API Key</p>
                       <p>• API Key 将安全地存储在您的浏览器本地,不会上传到任何服务器</p>
@@ -416,7 +527,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = React.memo(({ isOpen,
                 <p className="text-[11px] text-slate-400 leading-relaxed">
                   系统会自动检测模型配额和可用性。当首选模型额度用完或调用失败时，
                   会自动切换到下一个可用模型，确保工作流持续运行。
-                  您可以在"模型优先级"标签页调整模型顺序。
+                  您可以在"默认模型"标签页选择各类任务使用的模型。
                 </p>
               </div>
             </div>

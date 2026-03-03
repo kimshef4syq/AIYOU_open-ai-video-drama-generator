@@ -117,7 +117,7 @@ router.put('/:id/snapshot', async (req, res) => {
           height: n.height || 360,
           status: n.status || 'IDLE',
           data: JSON.stringify(n.data || {}),
-          inputs: n.inputs || [],
+          inputs: JSON.stringify(n.inputs || []),
         }));
         await trx('nodes').insert(nodeRows);
       }
@@ -144,7 +144,7 @@ router.put('/:id/snapshot', async (req, res) => {
           width: g.width || 600,
           height: g.height || 400,
           color: g.color || '#3b82f6',
-          node_ids: g.nodeIds || [],
+          node_ids: JSON.stringify(g.nodeIds || []),
           data: JSON.stringify(g.data || {}),
         }));
         await trx('groups').insert(groupRows);

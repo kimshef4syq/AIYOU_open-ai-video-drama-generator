@@ -447,13 +447,13 @@ export const BottomPanel: React.FC<BottomPanelContext> = (ctx) => {
                  let requestBody: any;
 
                  if (provider === 'yunwu') {
-                     apiUrl = 'http://localhost:3001/api/yunwuapi/status';
+                     apiUrl = 'http://localhost:3002/api/yunwuapi/status';
                      requestBody = { task_id: soraTaskId };
                  } else if (provider === 'sutu') {
-                     apiUrl = 'http://localhost:3001/api/sutu/query';
+                     apiUrl = 'http://localhost:3002/api/sutu/query';
                      requestBody = { id: soraTaskId };
                  } else if (provider === 'yijiapi') {
-                     apiUrl = `http://localhost:3001/api/yijiapi/query/${encodeURIComponent(soraTaskId)}`;
+                     apiUrl = `http://localhost:3002/api/yijiapi/query/${encodeURIComponent(soraTaskId)}`;
                      requestBody = null;
                  } else {
                      throw new Error('不支持的provider');
@@ -485,7 +485,8 @@ export const BottomPanel: React.FC<BottomPanelContext> = (ctx) => {
                      newStatus = data.status;
                      newProgress = data.progress || 0;
                      if (newStatus === 'error' || newStatus === 'failed') {
-                         newViolationReason = data.error || '视频生成失败';
+                         const rawErr = data.error || '视频生成失败';
+                         newViolationReason = typeof rawErr === 'string' ? rawErr : (rawErr?.message || JSON.stringify(rawErr));
                      }
                  } else if (provider === 'sutu') {
                      newVideoUrl = data.data?.remote_url || data.data?.video_url;
@@ -748,7 +749,7 @@ export const BottomPanel: React.FC<BottomPanelContext> = (ctx) => {
                                         <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg">
                                             <div className="flex items-start gap-2">
                                                 <AlertCircle size={12} className="text-red-400 mt-0.5 flex-shrink-0" />
-                                                <span className="text-[10px] text-red-300">{data.error}</span>
+                                                <span className="text-[10px] text-red-300">{typeof data.error === 'string' ? data.error : (data.error?.message || String(data.error || ''))}</span>
                                             </div>
                                         </div>
                                     )}
@@ -961,7 +962,7 @@ export const BottomPanel: React.FC<BottomPanelContext> = (ctx) => {
                              <div className="flex-1 px-3 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg">
                                  <div className="flex items-center gap-2 text-blue-300 text-[10px]">
                                      <Loader2 className="animate-spin" size={12} />
-                                     <span>视频生成中 {data.progress || 0}%</span>
+                                     <span>{data.statusMessage || '视频生成中'} {data.progress || 0}%</span>
                                  </div>
                                  {/* 进度条 */}
                                  <div className="mt-1.5 h-1 bg-blue-500/20 rounded-full overflow-hidden">

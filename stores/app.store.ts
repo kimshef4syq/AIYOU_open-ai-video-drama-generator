@@ -6,13 +6,12 @@
  * - 连接管理
  * - 用户认证
  * - UI 状态管理
- * - LocalStorage 持久化
+ *
+ * 注意：不做持久化，数据只存数据库。刷新从 DB 加载。
  */
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import { immer } from 'zustand/middleware/immer';
-import { AppNode, Connection, Workflow, NodeStatus } from '../types';
+import { AppNode, Connection, Workflow } from '../types';
 
 // 用户接口
 export interface User {
@@ -106,10 +105,8 @@ interface AppState {
   reset: () => void;
 }
 
-// 创建 store
-export const useAppStore = create<AppState>()(
-  persist(
-    (set, get) => ({
+// 创建 store（纯内存，不持久化）
+export const useAppStore = create<AppState>()((set, get) => ({
       // ========== 初始状态 ==========
       nodes: [],
       connections: [],
@@ -286,19 +283,7 @@ export const useAppStore = create<AppState>()(
           contextMenu: null
         }
       })
-    }),
-    {
-      name: 'aiyou-storage', // LocalStorage key
-      partialize: (state) => ({
-        // 只持久化部分状态
-        nodes: state.nodes,
-        connections: state.connections,
-        workflows: state.workflows,
-        viewport: state.viewport
-      })
-    }
-  )
-);
+}));
 
 // ========== 选择器 hooks（优化性能）==========
 

@@ -75,7 +75,7 @@ const DEFAULT_CONFIG: ModelConfiguration = {
       name: '云雾API',
       description: '云雾AI视频生成平台',
       enabled: true,
-      baseUrl: 'http://localhost:3001/api/yunwuapi',
+      baseUrl: 'http://localhost:3002/api/yunwuapi',
       apiKeyRequired: true,
       models: [
         {

@@ -10,8 +10,8 @@
  */
 export const SORA_MODEL_NAMES = {
   yunwu: {
-    sd: 'sora-2-all',           // 云雾标清
-    hd: 'sora-2-pro-all'        // 云雾高清
+    sd: 'veo3.1-fast',             // 云雾标清（Veo 3.1 快速版）
+    hd: 'veo3.1-pro'               // 云雾高清（Veo 3.1 专业版）
   },
   sutu: {
     sd: 'sora2-new',            // 速推标清

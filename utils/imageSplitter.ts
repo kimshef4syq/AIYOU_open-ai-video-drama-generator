@@ -1,5 +1,6 @@
 // utils/imageSplitter.ts
 import { SplitStoryboardShot } from '../types';
+import { uploadMediaToServer } from '../services/mediaStorageService';
 
 /**
  * 图像切割工具 - 将九宫格/六宫格分镜图切割为单个分镜图
@@ -62,8 +63,9 @@ export async function splitStoryboardImage(
         0, 0, panelWidth, panelHeight   // 目标位置和尺寸
       );
 
-      // 转换为Base64
-      const splitImage = canvas.toDataURL('image/png', 0.95);
+      // 转换为Base64，然后上传到服务端
+      const splitImageBase64 = canvas.toDataURL('image/png', 0.95);
+      const splitImage = await uploadMediaToServer(splitImageBase64, { nodeId: sourceNodeId, type: 'image' });
 
       // 获取对应的分镜描述数据
       const shotData = shotsData[i] || {};

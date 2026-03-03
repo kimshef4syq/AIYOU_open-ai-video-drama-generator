@@ -42,6 +42,7 @@ interface SidebarDockProps {
     selectedWorkflowId: string | null;
     onSelectWorkflow: (id: string | null) => void;
     onSaveWorkflow: () => void;
+    onNewWorkflow: () => void;
     onDeleteWorkflow: (id: string) => void;
     onRenameWorkflow: (id: string, title: string) => void;
 
@@ -96,6 +97,7 @@ export const SidebarDock: React.FC<SidebarDockProps> = ({
     selectedWorkflowId,
     onSelectWorkflow,
     onSaveWorkflow,
+    onNewWorkflow,
     onDeleteWorkflow,
     onRenameWorkflow,
     onOpenSettings
@@ -123,6 +125,12 @@ export const SidebarDock: React.FC<SidebarDockProps> = ({
 
     const handlePanelEnter = () => {
         if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
+    };
+
+    // 右键菜单打开时阻止面板关闭
+    const handlePanelLeaveGuarded = () => {
+        if (contextMenu) return; // 右键菜单打开时不关闭面板
+        handlePanelLeave();
     };
 
     const handlePanelLeave = () => {
@@ -219,15 +227,15 @@ export const SidebarDock: React.FC<SidebarDockProps> = ({
                         <span className="text-xs font-bold uppercase tracking-widest text-white/50">
                             我的工作流
                         </span>
-                        <button onClick={onSaveWorkflow} className="p-1.5 bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500 hover:text-white rounded-md transition-colors" title="保存当前工作流">
-                            <Save size={14} />
+                        <button onClick={onNewWorkflow} className="p-1.5 bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500 hover:text-white rounded-md transition-colors" title="新建空工作流">
+                            <Plus size={14} />
                         </button>
                     </div>
                     <div className="flex-1 overflow-y-auto p-3 custom-scrollbar space-y-3 relative">
                         {workflows.length === 0 ? (
                             <div className="flex flex-col items-center justify-center py-10 text-slate-500 opacity-60 select-none">
                                 <FolderHeart size={48} strokeWidth={1} className="mb-3 opacity-50" />
-                                <span className="text-[10px] font-medium tracking-widest uppercase text-center">空空如也<br/>保存您的第一个工作流</span>
+                                <span className="text-[10px] font-medium tracking-widest uppercase text-center">空空如也<br/>点击右上角「保存」保存工作流</span>
                             </div>
                         ) : (
                             workflows.map(wf => (
@@ -291,7 +299,7 @@ export const SidebarDock: React.FC<SidebarDockProps> = ({
                     </span>
                 </div>
                 <div className="flex-1 overflow-y-auto p-2 custom-scrollbar space-y-2">
-                    {[NodeType.IMAGE_GENERATOR, NodeType.SCRIPT_PLANNER, NodeType.SCRIPT_EPISODE, NodeType.CHARACTER_NODE, NodeType.STYLE_PRESET, NodeType.STORYBOARD_GENERATOR, NodeType.STORYBOARD_IMAGE, NodeType.STORYBOARD_SPLITTER, NodeType.SORA_VIDEO_GENERATOR, NodeType.STORYBOARD_VIDEO_GENERATOR, NodeType.DRAMA_ANALYZER, NodeType.VIDEO_EDITOR].map(t => {
+                    {[NodeType.SCRIPT_PLANNER, NodeType.SCRIPT_EPISODE, NodeType.CHARACTER_NODE, NodeType.STORYBOARD_IMAGE, NodeType.STORYBOARD_SPLITTER, NodeType.SORA_VIDEO_GENERATOR, NodeType.STORYBOARD_VIDEO_GENERATOR, NodeType.DRAMA_ANALYZER, NodeType.VIDEO_EDITOR].map(t => {
                         const ItemIcon = getNodeIcon(t);
                         return (
                             <button
@@ -364,9 +372,9 @@ export const SidebarDock: React.FC<SidebarDockProps> = ({
 
             {/* Slide-out Panels */}
             <div
-                className={`fixed left-24 top-1/2 -translate-y-1/2 max-h-[75vh] h-auto w-72 bg-gradient-to-br from-white/10 via-white/5 to-white/10 backdrop-blur-3xl border border-white/20 rounded-2xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_8px_32px_0_rgba(0,0,0,0.37)] transition-all duration-500 ease-[${SPRING}] z-[60] flex flex-col overflow-hidden ${activePanel ? 'translate-x-0 opacity-100' : '-translate-x-10 opacity-0 pointer-events-none scale-95'}`}
+                className={`fixed left-24 top-1/2 -translate-y-1/2 max-h-[75vh] w-72 bg-gradient-to-br from-white/10 via-white/5 to-white/10 backdrop-blur-3xl border border-white/20 rounded-2xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.1),0_8px_32px_0_rgba(0,0,0,0.37)] transition-all duration-500 ease-[${SPRING}] z-[60] flex flex-col overflow-hidden ${activePanel ? 'translate-x-0 opacity-100' : '-translate-x-10 opacity-0 pointer-events-none scale-95'}`}
                 onMouseEnter={handlePanelEnter}
-                onMouseLeave={handlePanelLeave}
+                onMouseLeave={handlePanelLeaveGuarded}
                 onMouseDown={(e) => e.stopPropagation()}
                 onWheel={(e) => e.stopPropagation()}
             >

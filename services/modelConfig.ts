@@ -24,14 +24,14 @@ export interface ModelInfo {
 export const IMAGE_MODELS: ModelInfo[] = [
   {
     id: 'gemini-3-pro-image-preview',
-    name: 'Gemini 3 Pro Image Preview',
+    name: 'Gemini 3.1 Pro Image Preview',
     category: 'image',
     priority: 1,
     quality: 10,
     speed: 7,
     cost: 5,
     capabilities: ['最高质量', '专业级输出', '图像生成', '支持 aspectRatio'],
-    description: 'Gemini 3 Pro 预览版，最高质量的图像生成',
+    description: 'Gemini 3.1 Pro 预览版，最高质量的图像生成',
     tags: ['pro', 'high-quality', 'image-generation'],
     isDefault: true
   },
@@ -229,7 +229,7 @@ export const VIDEO_MODELS: ModelInfo[] = [
 export const TEXT_MODELS: ModelInfo[] = [
   {
     id: 'gemini-3-pro-preview',
-    name: 'Gemini 3 Pro Preview',
+    name: 'Gemini 3.1 Pro Preview',
     category: 'text',
     priority: 1,
     quality: 10,
@@ -242,7 +242,7 @@ export const TEXT_MODELS: ModelInfo[] = [
   },
   {
     id: 'gemini-3-flash-preview',
-    name: 'Gemini 3 Flash Preview',
+    name: 'Gemini 3.1 Flash Preview',
     category: 'text',
     priority: 2,
     quality: 8,

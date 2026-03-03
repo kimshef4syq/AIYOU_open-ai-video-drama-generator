@@ -63,9 +63,23 @@ export const ConnectionLayer: React.FC<ConnectionLayerProps> = ({
       const endY = toNode.y + toHeight / 2;
 
       const path = calculatePath(startX, startY, endX, endY);
+      // 每条连接线独立渐变，使用 userSpaceOnUse 避免水平线包围盒高度为 0 导致渐变失效
+      const gradientId = `conn-gradient-${conn.from}-${conn.to}`;
 
       return (
         <g key={`${conn.from}-${conn.to}-${idx}`}>
+          <defs>
+            <linearGradient
+              id={gradientId}
+              gradientUnits="userSpaceOnUse"
+              x1={startX} y1={startY}
+              x2={endX} y2={endY}
+            >
+              <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.5" />
+              <stop offset="100%" stopColor="#a855f7" stopOpacity="0.5" />
+            </linearGradient>
+          </defs>
+
           {/* 不可见的粗线用于点击检测 */}
           <path
             d={path}
@@ -79,7 +93,7 @@ export const ConnectionLayer: React.FC<ConnectionLayerProps> = ({
           {/* 可见的连接线 */}
           <path
             d={path}
-            stroke="url(#gradient)"
+            stroke={`url(#${gradientId})`}
             strokeWidth="2"
             fill="none"
             strokeLinecap="round"
@@ -135,9 +149,20 @@ export const ConnectionLayer: React.FC<ConnectionLayerProps> = ({
 
     return (
       <g>
+        <defs>
+          <linearGradient
+            id="dragging-gradient"
+            gradientUnits="userSpaceOnUse"
+            x1={startX} y1={startY}
+            x2={endX} y2={endY}
+          >
+            <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.5" />
+            <stop offset="100%" stopColor="#a855f7" stopOpacity="0.5" />
+          </linearGradient>
+        </defs>
         <path
           d={path}
-          stroke="url(#gradient)"
+          stroke="url(#dragging-gradient)"
           strokeWidth="2"
           fill="none"
           strokeLinecap="round"
@@ -163,14 +188,6 @@ export const ConnectionLayer: React.FC<ConnectionLayerProps> = ({
 
   return (
     <>
-      {/* SVG 定义 */}
-      <defs>
-        <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.5" />
-          <stop offset="100%" stopColor="#a855f7" stopOpacity="0.5" />
-        </linearGradient>
-      </defs>
-
       {/* 已建立的连接 */}
       {renderConnections}
 

@@ -21,10 +21,11 @@ export class YunwuProvider implements SoraProvider {
   readonly displayName = '云雾 API';
 
   /**
-   * 云雾 API 配置转换
-   * - aspect_ratio -> orientation (16:9 -> landscape, 9:16 -> portrait)
-   * - duration: string -> number
-   * - hd: boolean -> size: 'small' | 'medium' | 'large'
+   * 云雾 API 配置转换（Veo 3.1 参数格式）
+   * - aspect_ratio: 直接传递 '16:9' 或 '9:16'
+   * - enhance_prompt: 中文提示词自动翻译为英文
+   * - enable_upsample: 上采样提升画质
+   * 注意: Veo 不支持自定义时长/尺寸，由模型自动决定
    */
   transformConfig(userConfig: Sora2UserConfig): ProviderSpecificConfig {
 
@@ -38,39 +39,11 @@ export class YunwuProvider implements SoraProvider {
       throw new Error('缺少必需的 aspect_ratio 字段');
     }
 
-    if (userConfig.hd === undefined) {
-      console.error('[YunwuProvider] ❌ 缺少 hd 字段, userConfig:', userConfig);
-      throw new Error('缺少必需的 hd 字段');
-    }
-
-    if (!userConfig.duration) {
-      console.error('[YunwuProvider] ❌ 缺少 duration 字段, userConfig:', userConfig);
-      throw new Error('缺少必需的 duration 字段');
-    }
-
-    // 映射 aspect_ratio 到 orientation
-    const orientation = userConfig.aspect_ratio === '16:9' ? 'landscape' : 'portrait';
-
-    // 映射 hd 到 size
-    // true -> large, false -> medium
-    const size = userConfig.hd ? 'large' : 'medium';
-
-    // duration 从字符串转换为数字
-    const duration = parseInt(userConfig.duration);
-
-    // 验证转换结果
-    if (isNaN(duration)) {
-      console.error('[YunwuProvider] ❌ duration 转换失败:', userConfig.duration);
-      throw new Error(`duration "${userConfig.duration}" 无法转换为数字`);
-    }
-
     const result = {
-      orientation,
-      duration,
-      size,
-      watermark: false,  // 云雾 API 默认无水印
+      aspect_ratio: userConfig.aspect_ratio,  // '16:9' 或 '9:16'，直接传递
+      enhance_prompt: false,  // 关闭：长 prompt 会导致云雾翻译服务卡死
+      enable_upsample: true,  // 上采样提升画质
     };
-
 
     return result;
   }
@@ -103,7 +76,7 @@ export class YunwuProvider implements SoraProvider {
       'yunwuSubmitTask',
       async () => {
         // 使用后端代理
-        const apiUrl = 'http://localhost:3001/api/yunwu/create';
+        const apiUrl = 'http://localhost:3002/api/yunwu/create';
 
         const response = await fetch(apiUrl, {
           method: 'POST',
@@ -172,7 +145,7 @@ export class YunwuProvider implements SoraProvider {
       'yunwuCheckStatus',
       async () => {
         // 使用后端代理
-        const apiUrl = `http://localhost:3001/api/yunwu/query?id=${encodeURIComponent(taskId)}`;
+        const apiUrl = `http://localhost:3002/api/yunwu/query?id=${encodeURIComponent(taskId)}`;
 
 
         const response = await fetch(apiUrl, {

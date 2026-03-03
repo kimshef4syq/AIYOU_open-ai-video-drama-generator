@@ -1,10 +1,10 @@
 /**
  * 云雾 API 提供商实现
  * 使用云雾 API (https://yunwu.ai)
- * 兼容 Gemini 原生格式
+ * 自动识别模型类型：Gemini 模型走 /v1beta/ 端点，其他模型走 OpenAI /v1/chat/completions 端点
  */
 
-import { LLMProvider, GenerateImageOptions, GenerateContentOptions } from './baseProvider';
+import { LLMProvider, GenerateImageOptions, GenerateContentOptions, imageToBase64 } from './baseProvider';
 import { LLMProviderType } from '../../types';
 import { logAPICall } from '../apiLogger';
 
@@ -39,7 +39,14 @@ export class YunwuProvider implements LLMProvider {
   }
 
   /**
-   * 构建云雾 API 请求 URL
+   * 判断是否为 Gemini 格式模型（走 /v1beta/ 端点）
+   */
+  private isGeminiModel(model: string): boolean {
+    return model.startsWith('gemini-') || model.startsWith('imagen-') || model.startsWith('learnlm-');
+  }
+
+  /**
+   * 构建云雾 API 请求 URL（Gemini 格式）
    */
   private buildUrl(endpoint: string, apiKey: string): string {
     return `${this.BASE_URL}${endpoint}?key=${apiKey}`;
@@ -47,6 +54,7 @@ export class YunwuProvider implements LLMProvider {
 
   /**
    * 生成文本内容
+   * Gemini 模型走 /v1beta/ 端点，其他模型走 /v1/chat/completions
    */
   async generateContent(
     prompt: string,
@@ -58,6 +66,11 @@ export class YunwuProvider implements LLMProvider {
       throw new Error('YUNWU_API_KEY_NOT_CONFIGURED');
     }
 
+    if (!this.isGeminiModel(model)) {
+      return this.generateContentOpenAI(prompt, model, apiKey, options);
+    }
+
+    // === Gemini REST 格式 ===
     const endpoint = `/v1beta/models/${model}:generateContent`;
     const url = this.buildUrl(endpoint, apiKey);
 
@@ -85,7 +98,6 @@ export class YunwuProvider implements LLMProvider {
       }
     }
 
-
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -96,7 +108,7 @@ export class YunwuProvider implements LLMProvider {
 
     if (!response.ok) {
       const error = await response.json();
-      console.error('[YunwuProvider] API Error:', error);
+      console.error('[YunwuProvider] Gemini API Error:', error);
       throw new Error(error.error?.message || '云雾 API 内容生成失败');
     }
 
@@ -115,6 +127,47 @@ export class YunwuProvider implements LLMProvider {
       .join('\n\n');
 
     return text;
+  }
+
+  /**
+   * OpenAI chat completions 格式（非 Gemini 模型）
+   */
+  private async generateContentOpenAI(
+    prompt: string,
+    model: string,
+    apiKey: string,
+    options?: GenerateContentOptions
+  ): Promise<string> {
+    const url = `${this.BASE_URL}/v1/chat/completions`;
+
+    const messages: any[] = [];
+    if (options?.systemInstruction) {
+      messages.push({ role: 'system', content: options.systemInstruction });
+    }
+    messages.push({ role: 'user', content: prompt });
+
+    const body: any = { model, messages };
+    if (options?.responseMimeType === 'application/json') {
+      body.response_format = { type: 'json_object' };
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      console.error('[YunwuProvider] OpenAI API Error:', error);
+      throw new Error(error.error?.message || '云雾 API 内容生成失败');
+    }
+
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content || '';
   }
 
   /**
@@ -137,14 +190,12 @@ export class YunwuProvider implements LLMProvider {
     // 构建请求内容
     const parts: any[] = [{ text: prompt }];
 
-    // 添加参考图片
+    // 添加参考图片（支持 Base64 和 URL）
     if (referenceImages && referenceImages.length > 0) {
-      for (const imageBase64 of referenceImages) {
+      for (const imageRef of referenceImages) {
+        const { data, mimeType } = await imageToBase64(imageRef);
         parts.push({
-          inlineData: {
-            data: imageBase64.split(',')[1] || imageBase64,
-            mimeType: 'image/jpeg'
-          }
+          inlineData: { data, mimeType }
         });
       }
     }

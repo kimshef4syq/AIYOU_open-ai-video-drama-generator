@@ -226,7 +226,7 @@ class APILogger {
      */
     private sendToServer(log: APILogEntry) {
         // 使用 sendBeacon 或 fetch 发送日志
-        const logUrl = 'http://localhost:3001/api/logs';
+        const logUrl = 'http://localhost:3002/api/logs';
 
         // 清理日志数据以减小大小
         const cleanLog = {

@@ -34,7 +34,7 @@ app.use(cors({
   },
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 // 配置文件上传（使用内存存储，限制文件大小为 100MB）
 const upload = multer({
@@ -165,6 +165,80 @@ app.post('/api/upload-oss', upload.single('file'), async (req, res) => {
       success: false,
       error: error.message || '文件上传失败'
     });
+  }
+});
+
+/**
+ * 本地文件上传接口（OSS 未配置时的降级方案）
+ * POST /api/upload-local
+ *
+ * 参数（form-data）:
+ *   - file: 要上传的文件
+ *   - projectId: 项目 ID
+ *   - episodeId: 剧集节点 ID（可选，默认 "default"）
+ *   - type: 文件类型 "image" 或 "video"（默认 "image"）
+ *
+ * 文件夹结构: server/uploads/{projectId}/{episodeId}/{type}s/{filename}
+ */
+app.post('/api/upload-local', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: '没有上传文件' });
+    }
+
+    const { originalname, mimetype, buffer, size } = req.file;
+    const { projectId = 'default', episodeId = 'default', type = 'image' } = req.body;
+
+    // 验证文件类型
+    const allowedTypes = [
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+      'video/mp4', 'video/webm',
+      'audio/mpeg', 'audio/wav', 'audio/mp3'
+    ];
+    if (!allowedTypes.includes(mimetype)) {
+      return res.status(400).json({ success: false, error: `不支持的文件类型: ${mimetype}` });
+    }
+
+    // 验证 type 参数
+    const typeFolder = type === 'video' ? 'videos' : 'images';
+
+    // 构建目录路径: uploads/{projectId}/{episodeId}/{typeFolder}/
+    const uploadDir = path.join(__dirname, 'uploads', projectId, episodeId, typeFolder);
+    await fs.promises.mkdir(uploadDir, { recursive: true });
+
+    // 生成唯一文件名
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 8);
+    const ext = originalname.split('.').pop() || 'png';
+    const fileName = `${timestamp}_${random}.${ext}`;
+    const filePath = path.join(uploadDir, fileName);
+
+    // 写入文件
+    await fs.promises.writeFile(filePath, buffer);
+
+    // 返回可访问的 URL
+    const fileUrl = `http://localhost:${PORT}/uploads/${projectId}/${episodeId}/${typeFolder}/${fileName}`;
+
+    console.log('📁 本地上传成功:', {
+      originalName: originalname,
+      filePath: filePath,
+      url: fileUrl,
+      size: `${(size / 1024).toFixed(2)}KB`,
+      type: mimetype
+    });
+
+    res.json({
+      success: true,
+      url: fileUrl,
+      fileName: fileName,
+      size: size,
+      type: mimetype,
+      originalName: originalname
+    });
+
+  } catch (error) {
+    console.error('❌ 本地上传失败:', error);
+    res.status(500).json({ success: false, error: error.message || '本地文件上传失败' });
   }
 });
 
@@ -431,7 +505,7 @@ app.post('/api/yunwu/create', async (req, res) => {
       });
     }
 
-    const { prompt, images, model, orientation, duration, size, watermark } = req.body;
+    const { prompt, images, model, aspect_ratio, enhance_prompt, enable_upsample } = req.body;
 
     // 防御性检查:验证必需字段
     if (!prompt) {
@@ -443,45 +517,25 @@ app.post('/api/yunwu/create', async (req, res) => {
       });
     }
 
-    if (!orientation) {
-      console.error(`[${logId}] ❌ 缺少 orientation 参数`);
-      return res.status(400).json({
-        success: false,
-        error: '缺少 orientation 参数',
-        receivedBody: req.body
-      });
-    }
-
-    if (duration === undefined || duration === null) {
-      console.error(`[${logId}] ❌ 缺少 duration 参数`);
-      return res.status(400).json({
-        success: false,
-        error: '缺少 duration 参数',
-        receivedBody: req.body
-      });
-    }
-
     console.log(`[${logId}] 📤 云雾 API 提交任务:`, {
       prompt: prompt?.substring(0, 100) + '...',
       hasImages: !!images?.length,
       imagesCount: images?.length || 0,
-      orientation,
-      duration,
-      size,
-      watermark,
+      aspect_ratio,
+      enhance_prompt,
+      enable_upsample,
       model,
       apiKeyPrefix: apiKey.substring(0, 10) + '...',
     });
 
-    // 构建云雾 API 请求
+    // 构建云雾 API 请求（Veo 参数格式）
     const yunwuRequestBody = {
       prompt,
-      model: model || 'sora-2',
+      model: model || 'veo3.1-fast',
       images: images || [],
-      orientation,
-      duration,
-      size,
-      watermark: watermark !== undefined ? watermark : false,
+      aspect_ratio: aspect_ratio || '16:9',
+      enhance_prompt: enhance_prompt !== undefined ? enhance_prompt : true,
+      enable_upsample: enable_upsample !== undefined ? enable_upsample : true,
     };
 
     console.log(`[${logId}] 📋 发送到云雾 API 的请求体:`, JSON.stringify(yunwuRequestBody, null, 2));
@@ -1409,13 +1463,12 @@ app.post('/api/yunwuapi/create', async (req, res) => {
         ...(req.body.image_url && { image_url: req.body.image_url })
       };
     } else if (model && model.startsWith('veo')) {
-      // veo 统一格式
+      // veo 统一格式（Veo API 不支持 duration，由模型自动决定时长）
       requestBody = {
         model: model,
         prompt: prompt || '',
         images: images || [],
         aspect_ratio: aspect_ratio || '16:9',
-        duration: duration || 5,
         ...(enhance_prompt !== undefined && { enhance_prompt }),
         ...(enable_upsample !== undefined && { enable_upsample })
       };
@@ -1587,36 +1640,70 @@ app.post('/api/yunwuapi/status', async (req, res) => {
       'data.status_update_time': data.status_update_time,
     });
     
-    // 云雾API返回嵌套结构：{ id, detail: { status, progress_pct, video_url, ... }, status, ... }
-    // 优先从 detail 字段读取实际状态和进度
+    // 云雾API返回嵌套结构，不同模型/阶段格式不同：
+    // - 统一格式: { id, status, detail: { status, progress_pct, video_url, pending_info: { progress_pct } } }
+    // - OpenAI格式: { id, status, progress, video_url }（completed 时扁平结构）
     const detail = data.detail || {};
+    const pendingInfo = detail.pending_info || {};
     const actualStatus = detail.status || data.status || 'pending';
-    
-    // 进度处理：progress_pct 是 0-1 之间的浮点数，转换为 0-100
+
+    // 进度处理：progress_pct 可���在 detail 或 detail.pending_info 中（0-1 浮点数）
     let progress = 0;
-    if (detail.progress_pct !== undefined) {
-      progress = Math.round(detail.progress_pct * 100);
+    const progressPct = detail.progress_pct ?? pendingInfo.progress_pct;
+    if (progressPct !== undefined && progressPct !== null) {
+      progress = Math.round(progressPct * 100);
+    } else if (data.progress !== undefined) {
+      // OpenAI 格式 completed 时直接返回 progress: 100
+      progress = data.progress;
     } else {
-      // 如果没有 progress_pct，根据状态推断进度
+      // 根据状态推断进度（覆盖 veo/luma/runway/sora 所有中间状态）
       switch (actualStatus) {
+        // 排队/等待
         case 'pending':
-          progress = 10;
+        case 'queued':
+        case 'submitted':
+          progress = 5;
           break;
+        // 预处理
+        case 'image_downloading':
+          progress = 15;
+          break;
+        // 视频生成中
         case 'processing':
-          progress = 50;
+        case 'generating':
+        case 'video_generating':
+          progress = 40;
           break;
+        // 视频生成完成，进入超分
+        case 'video_generation_completed':
+          progress = 60;
+          break;
+        // 超分辨率处理中
+        case 'video_upsampling':
+          progress = 75;
+          break;
+        // 超分完成
+        case 'video_upsampling_completed':
+          progress = 95;
+          break;
+        // 完成
         case 'completed':
+        case 'succeeded':
           progress = 100;
           break;
+        // 失败
         case 'failed':
+        case 'error':
+        case 'video_generation_failed':
+        case 'video_upsampling_failed':
           progress = 0;
           break;
         default:
           progress = 30;
       }
     }
-    
-    // 提取视频URL（优先从 detail.video_url，其次从 detail.output?.media_url）
+
+    // 提取视频URL（多个可能位置）
     const videoUrl = detail.video_url || detail.output?.media_url || data.video_url;
 
     console.log(`[${logId}] ✅ 云雾API平台 查询响应:`, {
@@ -1638,23 +1725,47 @@ app.post('/api/yunwuapi/status', async (req, res) => {
       });
     }
 
-    // 统一响应格式
-    let taskStatus = actualStatus;
-
-    // 统一状态值：将 succeeded 映射为 completed
-    if (taskStatus === 'succeeded') {
-      taskStatus = 'completed';
+    // 统一状态值：将各模型的中间状态归一化为 4 类
+    let taskStatus;
+    switch (actualStatus) {
+      case 'pending':
+      case 'queued':
+      case 'submitted':
+        taskStatus = 'pending';
+        break;
+      case 'processing':
+      case 'generating':
+      case 'image_downloading':
+      case 'video_generating':
+      case 'video_generation_completed':
+      case 'video_upsampling':
+      case 'video_upsampling_completed':
+        taskStatus = 'processing';
+        break;
+      case 'completed':
+      case 'succeeded':
+        taskStatus = 'completed';
+        break;
+      case 'failed':
+      case 'error':
+      case 'video_generation_failed':
+      case 'video_upsampling_failed':
+        taskStatus = 'failed';
+        break;
+      default:
+        taskStatus = 'processing';
     }
 
     const result = {
       task_id: data.id || task_id,
       status: taskStatus,
+      status_detail: actualStatus,  // 原始详细状态（如 video_generating, video_upsampling）
       progress: progress,
       video_url: videoUrl,
       duration: detail.duration || data.duration,
-      resolution: detail.resolution || data.resolution,
+      resolution: detail.resolution || data.resolution || data.size,
       cover_url: detail.cover_url || data.cover_url,
-      error: taskStatus === 'failed' ? (detail.failure_reason || data.error || '视频生成失败') : undefined
+      error: taskStatus === 'failed' ? (detail.failure_reason || pendingInfo.failure_reason || data.error || '视频生成失败') : undefined
     };
 
     res.json(result);

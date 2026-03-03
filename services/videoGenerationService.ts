@@ -82,11 +82,9 @@ export async function generateVideoFromStoryboard(
         { platform: platformCode }
       );
 
-      // 报告进度
-      options.onProgress?.(
-        `正在生成视频... (${result.progress}%)`,
-        result.progress
-      );
+      // 报告进度（根据详细状态显示中文描述）
+      const statusMessage = getStatusMessage(result.statusDetail, result.progress);
+      options.onProgress?.(statusMessage, result.progress);
 
       if (result.status === 'completed') {
         options.onProgress?.('视频生成完成！', 100);
@@ -131,6 +129,36 @@ export async function generateVideoFromStoryboard(
   } catch (error: any) {
     console.error('[VideoGeneration] 视频生成失败:', error);
     throw new Error(`视频生成失败: ${error.message}`);
+  }
+}
+
+/**
+ * 根据详细状态返回中文描述
+ */
+function getStatusMessage(statusDetail?: string, progress?: number): string {
+  switch (statusDetail) {
+    case 'pending':
+    case 'queued':
+    case 'submitted':
+      return '排队等待中...';
+    case 'image_downloading':
+      return '正在下载参考图片...';
+    case 'video_generating':
+      return `视频生成中... (${progress ?? 0}%)`;
+    case 'video_generation_completed':
+      return '视频生成完成，准备超分...';
+    case 'video_upsampling':
+      return `超分辨率处理中... (${progress ?? 0}%)`;
+    case 'video_upsampling_completed':
+      return '超分完成，即将完成...';
+    case 'processing':
+    case 'generating':
+      return `正在生成视频... (${progress ?? 0}%)`;
+    case 'completed':
+    case 'succeeded':
+      return '视频生成完成！';
+    default:
+      return `正在生成视频... (${progress ?? 0}%)`;
   }
 }
 

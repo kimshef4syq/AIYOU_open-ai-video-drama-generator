@@ -17,6 +17,7 @@ import React, { memo, useRef, useState, useEffect, useCallback, useMemo } from '
 import { IMAGE_MODELS, TEXT_MODELS, VIDEO_MODELS, AUDIO_MODELS } from '../../services/modelConfig';
 import { promptManager } from '../../services/promptManager';
 import { getNodeNameCN, getNodeInfo } from '../../utils/nodeHelpers';
+import { uploadMediaToServer } from '../../services/mediaStorageService';
 import { getAllModelsConfig, getAllSubModelNames } from '../../services/modelConfigLoader';
 
 // Extracted modules
@@ -80,8 +81,8 @@ const CRITICAL_DATA_KEYS: readonly string[] = [
     'selectedFields', 'dramaName', 'taskGroups',
     'modelConfig',
     'selectedPlatform', 'selectedModel', 'subModel',
-    'availableShots', 'selectedShotIds', 'generatedPrompt', 'fusedImage',
-    'isLoading', 'isLoadingFusion', 'promptModified', 'status',
+    'availableShots', 'selectedShotIds', 'selectedSourceNodes', 'splitShots', 'isSplitting', 'generatedPrompt', 'fusedImage',
+    'isLoading', 'isLoadingFusion', 'promptModified', 'status', 'statusMessage',
     'audioUri', 'images', 'videoUris', 'isCached', 'cacheLocation',
     'episodeStoryboard', 'generationMode',
     'dramaIntroduction', 'worldview',
@@ -533,8 +534,10 @@ const NodeComponent: React.FC<NodeProps> = ({
 
     setIsUploading(true);
     const reader = new FileReader();
-    reader.onload = (e) => {
-      onUpdate(node.id, { videoUri: e.target?.result as string });
+    reader.onload = async (e) => {
+      const base64 = e.target?.result as string;
+      const url = await uploadMediaToServer(base64, { nodeId: node.id, type: 'video' });
+      onUpdate(node.id, { videoUri: url });
       setIsUploading(false);
     };
     reader.onerror = () => setIsUploading(false);
@@ -549,8 +552,10 @@ const NodeComponent: React.FC<NodeProps> = ({
 
     setIsUploading(true);
     const reader = new FileReader();
-    reader.onload = (e) => {
-      onUpdate(node.id, { image: e.target?.result as string });
+    reader.onload = async (e) => {
+      const base64 = e.target?.result as string;
+      const url = await uploadMediaToServer(base64, { nodeId: node.id, type: 'image' });
+      onUpdate(node.id, { image: url });
       setIsUploading(false);
     };
     reader.onerror = () => setIsUploading(false);

@@ -86,7 +86,7 @@ export class KieProvider implements SoraProvider {
       'kieSubmitTask',
       async () => {
         // 使用后端代理
-        const apiUrl = 'http://localhost:3001/api/kie/create';
+        const apiUrl = 'http://localhost:3002/api/kie/create';
         const response = await fetch(apiUrl, {
           method: 'POST',
           headers: {
@@ -162,7 +162,7 @@ export class KieProvider implements SoraProvider {
       'kieCheckStatus',
       async () => {
         // 使用后端代理
-        const apiUrl = `http://localhost:3001/api/kie/query?taskId=${encodeURIComponent(taskId)}`;
+        const apiUrl = `http://localhost:3002/api/kie/query?taskId=${encodeURIComponent(taskId)}`;
         const response = await fetch(apiUrl, {
           method: 'GET',
           headers: {

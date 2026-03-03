@@ -53,7 +53,7 @@ export class YunwuAPIPlatformProvider implements VideoPlatformProvider {
   ];
 
   private readonly config: YunwuAPIConfig = {
-    baseUrl: 'http://localhost:3001/api/yunwuapi',
+    baseUrl: 'http://localhost:3002/api/yunwuapi',
     endpoints: {
       submit: '/create',
       status: '/status'
@@ -212,7 +212,7 @@ export class YunwuAPIPlatformProvider implements VideoPlatformProvider {
 
     // veo 特有参数
     if (model === 'veo') {
-      requestBody.enhance_prompt = true;  // 中文转英文
+      requestBody.enhance_prompt = false;  // 关闭：长 prompt 会导致云雾翻译服务卡死
       requestBody.enable_upsample = true;
 
       // ⚠️ aspect_ratio 仅对 veo3 系列支持
@@ -247,7 +247,8 @@ export class YunwuAPIPlatformProvider implements VideoPlatformProvider {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+      const errMsg = typeof errorData.error === 'string' ? errorData.error : errorData.message || JSON.stringify(errorData.error) || `HTTP ${response.status}: ${response.statusText}`;
+      throw new Error(errMsg);
     }
 
     const data = await response.json();
@@ -285,7 +286,7 @@ export class YunwuAPIPlatformProvider implements VideoPlatformProvider {
 
 
     // Luma 使用独立的端点
-    const response = await fetch(`http://localhost:3001/api/yunwuapi/luma/create`, {
+    const response = await fetch(`http://localhost:3002/api/yunwuapi/luma/create`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -296,7 +297,8 @@ export class YunwuAPIPlatformProvider implements VideoPlatformProvider {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+      const errMsg = typeof errorData.error === 'string' ? errorData.error : errorData.message || JSON.stringify(errorData.error) || `HTTP ${response.status}: ${response.statusText}`;
+      throw new Error(errMsg);
     }
 
     const data = await response.json();
@@ -344,22 +346,19 @@ export class YunwuAPIPlatformProvider implements VideoPlatformProvider {
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+          const errMsg = typeof errorData.error === 'string' ? errorData.error : errorData.message || JSON.stringify(errorData.error) || `HTTP ${response.status}: ${response.statusText}`;
+      throw new Error(errMsg);
         }
 
         const data = await response.json();
 
 
-        // 映射状态
+        // 映射状态（服务端已归一化为 pending/processing/completed/failed）
         let status: 'queued' | 'processing' | 'completed' | 'error';
         switch (data.status) {
           case 'pending':
           case 'queued':
             status = 'queued';
-            break;
-          case 'processing':
-          case 'generating':
-            status = 'processing';
             break;
           case 'completed':
           case 'succeeded':
@@ -370,15 +369,17 @@ export class YunwuAPIPlatformProvider implements VideoPlatformProvider {
             status = 'error';
             break;
           default:
+            // processing 及所有未知状态都视为处理中
             status = 'processing';
         }
 
-        const progress = data.progress || data.progress_pct || 0;
+        const progress = data.progress ?? 0;
 
 
         const result: VideoGenerationResult = {
           taskId,
           status,
+          statusDetail: data.status_detail,
           progress: progress
         };
 

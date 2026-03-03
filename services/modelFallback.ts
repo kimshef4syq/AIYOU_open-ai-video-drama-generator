@@ -105,16 +105,23 @@ const updateModelStats = (modelId: string, success: boolean, error?: string) => 
 const shouldSkipModel = (modelId: string): boolean => {
   const stats = getModelStats(modelId);
 
-  // 如果连续失败超过 3 次，且最后一次失败在 1 小时内，跳过此模型
+  // 如果连续失败超过 3 次，且最后一次失败在 5 分钟内，跳过此模型
   if (stats.consecutiveFailures >= 3 && stats.lastErrorTime) {
-    const oneHourAgo = Date.now() - 60 * 60 * 1000;
-    if (stats.lastErrorTime > oneHourAgo) {
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+    if (stats.lastErrorTime > fiveMinutesAgo) {
       console.warn(`Model ${modelId} skipped due to recent failures`);
       return true;
     }
   }
 
   return false;
+};
+
+/**
+ * 清除所有模型的失败统计记录
+ */
+export const clearModelStats = (): void => {
+  localStorage.removeItem(STATS_KEY);
 };
 
 /**

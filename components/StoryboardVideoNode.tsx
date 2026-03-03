@@ -6,6 +6,7 @@
 import React, { useState, memo, useEffect } from 'react';
 import { AppNode, NodeType, SplitStoryboardShot } from '../types';
 import { Film, Play, Loader2, Grid3X3, Copy, Check, Image as ImageIcon, Wand2, AlertCircle, Video as VideoIcon, Download } from 'lucide-react';
+import { uploadMediaToServer } from '../services/mediaStorageService';
 
 interface StoryboardVideoNodeProps {
   node: AppNode;
@@ -315,12 +316,13 @@ const StoryboardVideoNodeComponent: React.FC<StoryboardVideoNodeProps> = ({
           ctx.fillText(`#${index + 1}`, cellX + 10, cellY + 25);
         });
 
-        // 转换为 base64
+        // 转换为 base64 并上传到服务端
         const fusedDataUrl = canvas.toDataURL('image/png');
+        const fusedUrl = await uploadMediaToServer(fusedDataUrl, { nodeId: node.id, type: 'image' });
 
-        // 保存融合图片
+        // 保存融合图片 URL
         onUpdate(node.id, {
-          fusedImage: fusedDataUrl,
+          fusedImage: fusedUrl,
           isLoadingFusion: false
         });
       } catch (error) {
@@ -490,7 +492,7 @@ const StoryboardVideoNodeComponent: React.FC<StoryboardVideoNodeProps> = ({
 
         <div className="text-center">
           <h3 className="text-sm font-bold text-white mb-1">正在生成视频</h3>
-          <p className="text-xs text-slate-400">请稍候，这可能需要几分钟...</p>
+          <p className="text-xs text-slate-400">{data.statusMessage || '请稍候，这可能需要几分钟...'}</p>
         </div>
 
         {/* Progress Steps */}
@@ -733,7 +735,7 @@ const StoryboardVideoChildNodeComponent: React.FC<StoryboardVideoNodeProps> = ({
       ) : data.error ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-red-400 bg-black/40 p-6 text-center">
           <AlertCircle className="text-red-500 mb-1" size={32} />
-          <span className="text-xs font-medium text-red-200">{data.error}</span>
+          <span className="text-xs font-medium text-red-200">{typeof data.error === 'string' ? data.error : (data.error?.message || String(data.error || ''))}</span>
         </div>
       ) : (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-600">
@@ -746,7 +748,7 @@ const StoryboardVideoChildNodeComponent: React.FC<StoryboardVideoNodeProps> = ({
       {node.status === 'error' && !videoUrl && (
         <div className="absolute inset-0 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-20">
           <AlertCircle className="text-red-500 mb-2" />
-          <span className="text-xs text-red-200">{data.error}</span>
+          <span className="text-xs text-red-200">{typeof data.error === 'string' ? data.error : (data.error?.message || String(data.error || ''))}</span>
         </div>
       )}
     </div>

@@ -7,6 +7,7 @@ import { characterGenerationManager } from './characterGenerationManager';
 import { generateCharacterProfile, detectTextInImage } from './geminiService';
 import { generateImageWithFallback } from './geminiServiceWithFallback';
 import { getUserDefaultModel, getUserPriority } from './modelConfig';
+import { uploadMediaToServer } from './mediaStorageService';
 import { AppNode } from '../types';
 import { NodeType } from '../types';
 import { promptManager } from './promptManager';
@@ -344,7 +345,8 @@ async function handleGenerateExpression(
             console.warn('[CharacterAction] Expression sheet still has text after all retries. Returning anyway.');
           }
 
-          return exprImages[0];
+          // 上传到服务端，返回 URL
+          return await uploadMediaToServer(exprImages[0], { nodeId, type: 'image' });
         }
       ),
       new Promise((_, reject) => {
@@ -505,12 +507,15 @@ async function handleGenerateThreeView(
           const MAX_ATTEMPTS = 3;
 
 
+          const threeViewPriority = getUserPriority('image');
+          const threeViewModel = threeViewPriority[0] || 'gemini-3-pro-image-preview';
+
           while (hasText && attempt < MAX_ATTEMPTS) {
             if (attempt > 0) {
               const retryPrompt = viewPrompt + " NO TEXT. NO LABELS. CLEAR BACKGROUND.";
               viewImages = await generateImageWithFallback(
                 retryPrompt,
-                getUserDefaultModel('image'),
+                threeViewModel,
                 inputImages,
                 { aspectRatio: '16:9', resolution: '1K', count: 1 },
                 { nodeId, nodeType: node.type }
@@ -518,7 +523,7 @@ async function handleGenerateThreeView(
             } else {
               viewImages = await generateImageWithFallback(
                 viewPrompt,
-                getUserDefaultModel('image'),
+                threeViewModel,
                 inputImages,
                 { aspectRatio: '16:9', resolution: '1K', count: 1 },
                 { nodeId, nodeType: node.type }
@@ -537,7 +542,8 @@ async function handleGenerateThreeView(
             throw new Error('三视图生成失败：API未返回图片数据');
           }
 
-          return viewImages[0];
+          // 上传到服务端，返回 URL
+          return await uploadMediaToServer(viewImages[0], { nodeId, type: 'image' });
         }
       ),
       new Promise((_, reject) => {

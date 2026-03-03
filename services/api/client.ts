@@ -11,7 +11,7 @@ export interface ApiResponse<T = unknown> {
   error?: string;
 }
 
-const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:3001/api';
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:3002/api';
 
 export async function apiRequest<T>(
   path: string,

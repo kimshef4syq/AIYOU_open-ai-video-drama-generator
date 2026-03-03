@@ -45,6 +45,7 @@ export interface VideoGenerationRequest {
 export interface VideoGenerationResult {
   taskId: string;
   status: 'queued' | 'processing' | 'completed' | 'error';
+  statusDetail?: string;
   progress: number;
   videoUrl?: string;
   videoDuration?: number;

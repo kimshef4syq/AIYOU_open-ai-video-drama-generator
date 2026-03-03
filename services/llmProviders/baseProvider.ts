@@ -67,3 +67,39 @@ export interface LLMProvider {
    */
   validateApiKey(apiKey: string): Promise<boolean>;
 }
+
+/**
+ * 将图片（Base64 data URI 或 URL）转为纯 Base64 字符串
+ * - data:image/...;base64,xxx → 提取 xxx
+ * - http(s)://... → fetch 后转 Base64
+ * - 其他（已是纯 Base64）→ 原样返回
+ */
+export async function imageToBase64(imageRef: string): Promise<{ data: string; mimeType: string }> {
+  // 已经是 data URI
+  if (imageRef.startsWith('data:')) {
+    const match = imageRef.match(/^data:(image\/\w+);base64,(.+)$/);
+    if (match) {
+      return { data: match[2], mimeType: match[1] };
+    }
+    // 格式异常的 data URI，尝试提取
+    return { data: imageRef.split(',')[1] || imageRef, mimeType: 'image/jpeg' };
+  }
+
+  // 是 URL，fetch 后转 Base64
+  if (imageRef.startsWith('http://') || imageRef.startsWith('https://')) {
+    const response = await fetch(imageRef);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: ${response.status}`);
+    }
+    const blob = await response.blob();
+    const mimeType = blob.type || 'image/jpeg';
+    const arrayBuffer = await blob.arrayBuffer();
+    const base64 = btoa(
+      new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+    );
+    return { data: base64, mimeType };
+  }
+
+  // 已经是纯 Base64
+  return { data: imageRef, mimeType: 'image/jpeg' };
+}

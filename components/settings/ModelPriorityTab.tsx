@@ -1,39 +1,50 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { CheckCircle, AlertCircle, ArrowUp, ArrowDown, RefreshCw, Image as ImageIcon, Type, Music } from 'lucide-react';
+import { Image as ImageIcon, Type, Music, Video, RefreshCw } from 'lucide-react';
 import {
   ModelCategory,
   getModelsByCategory,
-  getModelInfo,
-  saveUserPriority,
-  getUserPriority,
   IMAGE_MODELS,
   TEXT_MODELS,
-  AUDIO_MODELS
+  AUDIO_MODELS,
+  VIDEO_MODELS
 } from '../../services/modelConfig';
-import {
-  getAllModelStats,
-  getModelHealth,
-  resetModelStats
-} from '../../services/modelFallback';
 
-const MODEL_CATEGORIES = {
-  image: {
-    label: '图片生成模型',
-    icon: ImageIcon,
-    description: '按效果排序，优先使用高质量模型，自动降级到备用模型',
-    models: IMAGE_MODELS
-  },
+interface CategoryConfig {
+  label: string;
+  icon: React.ElementType;
+  description: string;
+  localStorageKey: string;
+  builtinModels: { id: string; name: string }[];
+}
+
+const CATEGORIES: Record<string, CategoryConfig> = {
   text: {
-    label: '文本生成模型 (LLM)',
+    label: '文本模型 (LLM)',
     icon: Type,
-    description: '推理能力优先，Flash 模型作为快速备用',
-    models: TEXT_MODELS
+    description: '剧本生成、分镜描述、提示词优化等文本任务',
+    localStorageKey: 'default_text_model',
+    builtinModels: TEXT_MODELS.map(m => ({ id: m.id, name: m.name }))
+  },
+  image: {
+    label: '图片模型',
+    icon: ImageIcon,
+    description: '文生图、角色设计、分镜图片生成',
+    localStorageKey: 'default_image_model',
+    builtinModels: IMAGE_MODELS.map(m => ({ id: m.id, name: m.name }))
+  },
+  video: {
+    label: '视频模型',
+    icon: Video,
+    description: '文生视频、分镜视频生成',
+    localStorageKey: 'default_video_model',
+    builtinModels: VIDEO_MODELS.map(m => ({ id: m.id, name: m.name }))
   },
   audio: {
-    label: '音频生成模型',
+    label: '音频模型',
     icon: Music,
-    description: 'TTS 和原生音频模型',
-    models: AUDIO_MODELS
+    description: 'TTS 语音合成、音效生成',
+    localStorageKey: 'default_audio_model',
+    builtinModels: AUDIO_MODELS.map(m => ({ id: m.id, name: m.name }))
   }
 };
 
@@ -42,113 +53,77 @@ interface ModelPriorityTabProps {
 }
 
 export const ModelPriorityTab: React.FC<ModelPriorityTabProps> = React.memo(({ onClose }) => {
-  const [modelPriorities, setModelPriorities] = useState<Record<ModelCategory, string[]>>({
-    image: [],
-    text: [],
-    audio: [],
-    video: []
-  });
-
-  const [modelHealth, setModelHealth] = useState<Record<string, {
-    healthy: boolean;
-    successRate: number;
-    consecutiveFailures: number;
-  }>>({});
-
+  const [defaults, setDefaults] = useState<Record<string, string>>({});
+  const [yunwuModels, setYunwuModels] = useState<string[]>([]);
   const [isSaved, setIsSaved] = useState(false);
 
   useEffect(() => {
-    const categories: ModelCategory[] = ['image', 'text', 'audio'];
-    const priorities: Record<ModelCategory, string[]> = {} as Record<ModelCategory, string[]>;
-
-    categories.forEach(category => {
-      const savedPriority = getUserPriority(category);
-      const availableModels = getModelsByCategory(category).map(m => m.id);
-      priorities[category] = [
-        ...savedPriority.filter(id => availableModels.includes(id)),
-        ...availableModels.filter(id => !savedPriority.includes(id))
-      ];
+    // 读取每个类别已保存的默认模型
+    const saved: Record<string, string> = {};
+    Object.entries(CATEGORIES).forEach(([key, cat]) => {
+      const val = localStorage.getItem(cat.localStorageKey);
+      if (val) saved[key] = val;
     });
+    setDefaults(saved);
 
-    setModelPriorities(priorities);
-
-    const stats = getAllModelStats();
-    const health: Record<string, { healthy: boolean; successRate: number; consecutiveFailures: number }> = {};
-    Object.keys(stats).forEach(modelId => {
-      health[modelId] = getModelHealth(modelId);
-    });
-    setModelHealth(health);
+    // 读取云雾模型列表
+    const cached = localStorage.getItem('YUNWU_MODELS');
+    if (cached) {
+      try { setYunwuModels(JSON.parse(cached)); } catch {}
+    }
   }, []);
 
-  const moveModelUp = useCallback((category: ModelCategory, currentIndex: number) => {
-    if (currentIndex === 0) return;
-    setModelPriorities(prev => {
-      const newPriority = [...prev[category]];
-      [newPriority[currentIndex - 1], newPriority[currentIndex]] =
-        [newPriority[currentIndex], newPriority[currentIndex - 1]];
-      return { ...prev, [category]: newPriority };
-    });
+  const handleChange = useCallback((category: string, modelId: string) => {
+    setDefaults(prev => ({ ...prev, [category]: modelId }));
   }, []);
-
-  const moveModelDown = useCallback((category: ModelCategory, currentIndex: number) => {
-    setModelPriorities(prev => {
-      if (currentIndex === prev[category].length - 1) return prev;
-      const newPriority = [...prev[category]];
-      [newPriority[currentIndex], newPriority[currentIndex + 1]] =
-        [newPriority[currentIndex + 1], newPriority[currentIndex]];
-      return { ...prev, [category]: newPriority };
-    });
-  }, []);
-
-  const resetToDefault = useCallback((category: ModelCategory) => {
-    const defaultPriority = getModelsByCategory(category)
-      .sort((a, b) => a.priority - b.priority)
-      .map(m => m.id);
-    setModelPriorities(prev => ({ ...prev, [category]: defaultPriority }));
-  }, []);
-
-  const handleResetStats = useCallback(() => {
-    resetModelStats();
-    const stats = getAllModelStats();
-    const health: Record<string, { healthy: boolean; successRate: number; consecutiveFailures: number }> = {};
-    Object.keys(stats).forEach(id => {
-      health[id] = getModelHealth(id);
-    });
-    setModelHealth(health);
-  }, []);
-
-  const getHealthIcon = useCallback((modelId: string) => {
-    const health = modelHealth[modelId];
-    if (!health) return <CheckCircle size={14} className="text-slate-600" />;
-    if (health.healthy) return <CheckCircle size={14} className="text-green-500" />;
-    if (health.consecutiveFailures >= 3) return <AlertCircle size={14} className="text-red-500" />;
-    return <AlertCircle size={14} className="text-yellow-500" />;
-  }, [modelHealth]);
 
   const handleSave = useCallback(() => {
-    Object.entries(modelPriorities).forEach(([category, priority]) => {
-      saveUserPriority(category as ModelCategory, priority);
+    Object.entries(CATEGORIES).forEach(([key, cat]) => {
+      const val = defaults[key];
+      if (val) {
+        localStorage.setItem(cat.localStorageKey, val);
+      } else {
+        localStorage.removeItem(cat.localStorageKey);
+      }
     });
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2000);
     setTimeout(onClose, 500);
-  }, [modelPriorities, onClose]);
+  }, [defaults, onClose]);
+
+  const handleReset = useCallback(() => {
+    Object.entries(CATEGORIES).forEach(([, cat]) => {
+      localStorage.removeItem(cat.localStorageKey);
+    });
+    setDefaults({});
+  }, []);
+
+  // 合并内置模型和云雾模型，去重
+  const getOptionsForCategory = (category: string): { id: string; name: string }[] => {
+    const cat = CATEGORIES[category];
+    const builtin = cat.builtinModels;
+    const builtinIds = new Set(builtin.map(m => m.id));
+
+    // 云雾模型中不在内置列表里的
+    const extra = yunwuModels
+      .filter(id => !builtinIds.has(id))
+      .map(id => ({ id, name: id }));
+
+    return [...builtin, ...extra];
+  };
 
   return (
     <>
-      <div className="p-6 space-y-6">
+      <div className="p-6 space-y-5">
         <div className="flex items-center justify-between">
           <div className="space-y-1">
-            <h3 className="text-sm font-bold text-white">模型优先级配置</h3>
+            <h3 className="text-sm font-bold text-white">默认模型配置</h3>
             <p className="text-[11px] text-slate-400">
-              拖动调整模型顺序，优先使用排在最前面的模型
+              为每种任务类型选择默认使用的模型
             </p>
           </div>
           <button
-            onClick={() => {
-              const categories: ModelCategory[] = ['image', 'text', 'audio'];
-              categories.forEach(cat => resetToDefault(cat));
-            }}
+            onClick={handleReset}
             className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] text-slate-400 hover:text-white transition-all flex items-center gap-1"
           >
             <RefreshCw size={12} />
@@ -156,129 +131,39 @@ export const ModelPriorityTab: React.FC<ModelPriorityTabProps> = React.memo(({ o
           </button>
         </div>
 
-        {Object.entries(MODEL_CATEGORIES).map(([key, category]) => {
+        {Object.entries(CATEGORIES).map(([key, category]) => {
           const Icon = category.icon;
-          const catKey = key as ModelCategory;
-          const priority = modelPriorities[catKey];
+          const options = getOptionsForCategory(key);
+          const currentValue = defaults[key] || '';
 
           return (
-            <div key={key} className="space-y-3">
-              <div className="flex items-center justify-between pb-2 border-b border-white/10">
-                <div className="flex items-center gap-2">
-                  <Icon size={16} className="text-slate-500" />
-                  <span className="text-xs font-bold text-slate-300">{category.label}</span>
-                </div>
-                <button
-                  onClick={() => resetToDefault(catKey)}
-                  className="text-[10px] text-cyan-400 hover:text-cyan-300 transition-colors"
-                >
-                  重置
-                </button>
+            <div key={key} className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Icon size={16} className="text-slate-500" />
+                <span className="text-xs font-bold text-slate-300">{category.label}</span>
               </div>
-
-              <p className="text-[10px] text-slate-500 leading-relaxed">
-                {category.description}
-              </p>
-
-              <div className="space-y-2">
-                {priority.map((modelId, index) => {
-                  const modelInfo = getModelInfo(modelId);
-                  if (!modelInfo) return null;
-
-                  const health = modelHealth[modelId];
-
-                  return (
-                    <div
-                      key={modelId}
-                      className="flex items-center gap-3 p-3 bg-black/30 border border-white/10 rounded-lg group hover:bg-black/40 transition-all"
-                    >
-                      <div className="flex items-center gap-1">
-                        <span className="text-[10px] font-bold text-slate-600 w-4">
-                          {index + 1}
-                        </span>
-                      </div>
-
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-medium text-white truncate">
-                            {modelInfo.name}
-                          </span>
-                          {modelInfo.isDefault && (
-                            <span className="px-1.5 py-0.5 bg-cyan-500/20 text-cyan-400 text-[9px] font-bold rounded">
-                              默认
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          {getHealthIcon(modelId)}
-                          {health && (
-                            <span className="text-[9px] text-slate-500">
-                              成功率: {health.successRate.toFixed(0)}%
-                              {health.consecutiveFailures > 0 && (
-                                <span className="text-yellow-500 ml-1">
-                                  ({health.consecutiveFailures} 连续失败)
-                                </span>
-                              )}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="hidden lg:flex items-center gap-1 flex-wrap">
-                        {modelInfo.tags.slice(0, 2).map(tag => (
-                          <span
-                            key={tag}
-                            className="px-1.5 py-0.5 bg-white/5 text-slate-500 text-[9px] rounded"
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => moveModelUp(catKey, index)}
-                          disabled={index === 0}
-                          className={`p-1 rounded transition-all ${
-                            index === 0
-                              ? 'text-slate-700 cursor-not-allowed'
-                              : 'text-slate-500 hover:text-white hover:bg-white/10'
-                          }`}
-                        >
-                          <ArrowUp size={14} />
-                        </button>
-                        <button
-                          onClick={() => moveModelDown(catKey, index)}
-                          disabled={index === priority.length - 1}
-                          className={`p-1 rounded transition-all ${
-                            index === priority.length - 1
-                              ? 'text-slate-700 cursor-not-allowed'
-                              : 'text-slate-500 hover:text-white hover:bg-white/10'
-                          }`}
-                        >
-                          <ArrowDown size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <p className="text-[10px] text-slate-500">{category.description}</p>
+              <select
+                value={currentValue}
+                onChange={(e) => handleChange(key, e.target.value)}
+                className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-cyan-500/50 focus:bg-white/10 transition-all appearance-none cursor-pointer"
+              >
+                <option value="" className="bg-[#1a1a2e]">使用系统默认</option>
+                {options.map((model) => (
+                  <option key={model.id} value={model.id} className="bg-[#1a1a2e]">
+                    {model.name}
+                  </option>
+                ))}
+              </select>
             </div>
           );
         })}
 
-        {/* 模型统计 */}
-        <div className="pt-4 border-t border-white/10">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-slate-500">模型调用统计</span>
-            <button
-              onClick={handleResetStats}
-              className="text-[10px] text-red-400 hover:text-red-300 transition-colors"
-            >
-              清除统计
-            </button>
-          </div>
-        </div>
+        {yunwuModels.length === 0 && (
+          <p className="text-[10px] text-slate-500 mt-2">
+            提示：在「基础设置」中配置云雾 API Key 后，可获取更多可用模型
+          </p>
+        )}
       </div>
 
       {/* Footer */}

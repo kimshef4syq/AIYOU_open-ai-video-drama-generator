@@ -19,7 +19,7 @@ router.post('/', async (req, res) => {
       width: width || 420, height: height || 360,
       status: 'IDLE',
       data: JSON.stringify(data || {}),
-      inputs: inputs || [],
+      inputs: JSON.stringify(inputs || []),
     }).returning('*');
     res.json({ success: true, data: node });
   } catch (error) {
@@ -33,11 +33,12 @@ router.put('/:id', async (req, res) => {
     const db = getDB();
     const { id } = req.params;
     const updates = { updated_at: new Date() };
-    const allowed = ['type', 'title', 'x', 'y', 'width', 'height', 'status', 'inputs'];
+    const allowed = ['type', 'title', 'x', 'y', 'width', 'height', 'status'];
     for (const key of allowed) {
       if (req.body[key] !== undefined) updates[key] = req.body[key];
     }
     if (req.body.data !== undefined) updates.data = JSON.stringify(req.body.data);
+    if (req.body.inputs !== undefined) updates.inputs = JSON.stringify(req.body.inputs);
     const [node] = await db('nodes').where({ id }).update(updates).returning('*');
     if (!node) return res.status(404).json({ success: false, error: '节点不存在' });
     res.json({ success: true, data: node });

@@ -26,6 +26,7 @@ import {
   SHORT_DRAMA_GENRES, SHORT_DRAMA_SETTINGS,
 } from './constants';
 import { SecureVideo, safePlay, safePause, AudioVisualizer, EpisodeViewer, InputThumbnails } from './helpers';
+import { uploadMediaToServer } from '../../services/mediaStorageService';
 import type { NodeContentContext } from './types';
 
 export const MediaContent: React.FC<NodeContentContext> = (ctx) => {
@@ -1185,21 +1186,21 @@ export const MediaContent: React.FC<NodeContentContext> = (ctx) => {
                                           )}
 
                                           {isFailed && (
-                                              <div className="bg-red-900/20 rounded-lg p-3 border border-red-500/20 flex flex-col gap-2">
+                                              <div className="bg-red-900/20 rounded-lg p-2 border border-red-500/20 flex items-center justify-between">
                                                   <div className="flex items-center gap-2 text-red-300 text-[10px]">
                                                       <AlertCircle size={12} />
-                                                      <span>生成失败</span>
+                                                      <span>{profile?.threeViewError ? '三视图生成失败' : profile?.expressionError ? '九宫格生成失败' : '生成失败'}</span>
                                                   </div>
-                                                  <button 
+                                                  <button
                                                       onClick={() => onCharacterAction?.(node.id, 'RETRY', name)}
-                                                      className="w-full py-1 bg-red-500/20 hover:bg-red-500/30 text-red-200 text-[10px] rounded"
+                                                      className="px-2 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-200 text-[10px] rounded"
                                                   >
                                                       重试
                                                   </button>
                                               </div>
                                           )}
 
-                                          {profile && !isProcessing && !isFailed && (
+                                          {profile && !isProcessing && (
                                               <div className="bg-[#18181b] rounded-lg p-2 border border-white/5 flex flex-col gap-2 animate-in fade-in cursor-pointer hover:bg-white/5 transition-colors" onClick={() => onViewCharacter?.(profile)}>
                                                   <div className="flex gap-3">
                                                       <div className="w-16 h-16 shrink-0 bg-black rounded-md overflow-hidden relative">
@@ -1456,7 +1457,7 @@ export const MediaContent: React.FC<NodeContentContext> = (ctx) => {
                   ) : (
                       <div className="flex flex-col items-center gap-3 text-slate-600 z-10 select-none">{isWorking ? <Loader2 size={32} className="animate-spin text-pink-500" /> : <Mic2 size={32} className="text-slate-500" />}<span className="text-[10px] font-bold uppercase tracking-widest">{isWorking ? '生成中...' : '准备生成'}</span></div>
                   )}
-                  {node.status === NodeStatus.ERROR && <div className="absolute inset-0 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-20"><AlertCircle className="text-red-500 mb-2" /><span className="text-xs text-red-200">{node.data.error}</span></div>}
+                  {node.status === NodeStatus.ERROR && <div className="absolute inset-0 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-20"><AlertCircle className="text-red-500 mb-2" /><span className="text-xs text-red-200">{typeof node.data.error === 'string' ? node.data.error : (node.data.error?.message || JSON.stringify(node.data.error))}</span></div>}
               </div>
           )
       }
@@ -1606,7 +1607,7 @@ export const MediaContent: React.FC<NodeContentContext> = (ctx) => {
                   {node.status === NodeStatus.ERROR && (
                       <div className="absolute inset-0 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-20">
                           <AlertCircle className="text-red-500 mb-2" />
-                          <span className="text-xs text-red-200">{node.data.error}</span>
+                          <span className="text-xs text-red-200">{typeof node.data.error === 'string' ? node.data.error : (node.data.error?.message || String(node.data.error || ''))}</span>
                       </div>
                   )}
               </div>
@@ -1691,7 +1692,7 @@ export const MediaContent: React.FC<NodeContentContext> = (ctx) => {
                   {node.status === NodeStatus.ERROR && (
                       <div className="absolute inset-0 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-20">
                           <AlertCircle className="text-red-500 mb-2" />
-                          <span className="text-xs text-red-200">{node.data.error}</span>
+                          <span className="text-xs text-red-200">{typeof node.data.error === 'string' ? node.data.error : (node.data.error?.message || String(node.data.error || ''))}</span>
                       </div>
                   )}
               </div>
@@ -2365,13 +2366,13 @@ export const MediaContent: React.FC<NodeContentContext> = (ctx) => {
                   let requestBody: any = { task_id: soraTaskId };
 
                   if (provider === 'yunwu') {
-                      apiUrl = 'http://localhost:3001/api/yunwuapi/status';
+                      apiUrl = 'http://localhost:3002/api/yunwuapi/status';
                       requestBody = { task_id: soraTaskId };
                   } else if (provider === 'sutu') {
-                      apiUrl = 'http://localhost:3001/api/sutu/query';
+                      apiUrl = 'http://localhost:3002/api/sutu/query';
                       requestBody = { id: soraTaskId };
                   } else if (provider === 'yijiapi') {
-                      apiUrl = `http://localhost:3001/api/yijiapi/query/${encodeURIComponent(soraTaskId)}`;
+                      apiUrl = `http://localhost:3002/api/yijiapi/query/${encodeURIComponent(soraTaskId)}`;
                       requestBody = null;
                   } else {
                       throw new Error('不支持的provider');
@@ -2403,7 +2404,8 @@ export const MediaContent: React.FC<NodeContentContext> = (ctx) => {
                       newStatus = data.status;
                       newProgress = data.progress || 0;
                       if (newStatus === 'error' || newStatus === 'failed') {
-                          newViolationReason = data.error || '视频生成失败';
+                          const rawErr = data.error || '视频生成失败';
+                          newViolationReason = typeof rawErr === 'string' ? rawErr : (rawErr?.message || JSON.stringify(rawErr));
                       }
                   } else if (provider === 'sutu') {
                       newVideoUrl = data.data?.remote_url || data.data?.video_url;
@@ -2488,7 +2490,7 @@ export const MediaContent: React.FC<NodeContentContext> = (ctx) => {
                   // 如果有 soraTaskId，先尝试从数据库下载
                   if (soraTaskId) {
                       try {
-                          const downloadUrl = `http://localhost:3001/api/videos/download/${soraTaskId}`;
+                          const downloadUrl = `http://localhost:3002/api/videos/download/${soraTaskId}`;
                           const response = await fetch(downloadUrl);
 
                           if (response.ok) {
@@ -2524,7 +2526,7 @@ export const MediaContent: React.FC<NodeContentContext> = (ctx) => {
                       // 保存到数据库
                       const taskId = soraTaskId || `video-${Date.now()}`;
 
-                      const saveResponse = await fetch('http://localhost:3001/api/videos/save', {
+                      const saveResponse = await fetch('http://localhost:3002/api/videos/save', {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
@@ -2541,7 +2543,7 @@ export const MediaContent: React.FC<NodeContentContext> = (ctx) => {
                           alert('视频已保存到数据库！现在开始下载...');
 
                           // 从数据库下载
-                          const downloadUrl = `http://localhost:3001/api/videos/download/${taskId}`;
+                          const downloadUrl = `http://localhost:3002/api/videos/download/${taskId}`;
                           const downloadResponse = await fetch(downloadUrl);
                           const blob = await downloadResponse.blob();
 
@@ -2601,7 +2603,7 @@ export const MediaContent: React.FC<NodeContentContext> = (ctx) => {
                                       };
                                   }
                               }}
-                              src={useLocalServer && soraTaskId ? `http://localhost:3001/api/videos/download/${soraTaskId}` : displayVideoUrl}
+                              src={useLocalServer && soraTaskId ? `http://localhost:3002/api/videos/download/${soraTaskId}` : displayVideoUrl}
                               className="w-full h-full object-cover bg-zinc-900"
                               loop
                               playsInline
@@ -2682,7 +2684,7 @@ export const MediaContent: React.FC<NodeContentContext> = (ctx) => {
                   {node.status === NodeStatus.ERROR && !displayVideoUrl && (
                       <div className="absolute inset-0 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-10">
                           <AlertCircle className="text-red-500 mb-2" />
-                          <span className="text-xs text-red-200">{node.data.error}</span>
+                          <span className="text-xs text-red-200">{typeof node.data.error === 'string' ? node.data.error : (node.data.error?.message || String(node.data.error || ''))}</span>
                       </div>
                   )}
               </div>
@@ -2710,7 +2712,7 @@ export const MediaContent: React.FC<NodeContentContext> = (ctx) => {
                             style={showImageGrid ? STYLE_BLUR_ON : STYLE_BLUR_OFF} // Pass Style
                         />
                     }
-                    {node.status === NodeStatus.ERROR && <div className="absolute inset-0 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-20"><AlertCircle className="text-red-500 mb-2" /><span className="text-xs text-red-200">{node.data.error}</span></div>}
+                    {node.status === NodeStatus.ERROR && <div className="absolute inset-0 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-20"><AlertCircle className="text-red-500 mb-2" /><span className="text-xs text-red-200">{typeof node.data.error === 'string' ? node.data.error : (node.data.error?.message || String(node.data.error || ''))}</span></div>}
                     {showImageGrid && (node.data.images || node.data.videoUris) && (
                         <div className="absolute inset-0 bg-black/40 z-10 grid grid-cols-2 gap-2 p-2 animate-in fade-in duration-200">
                             {node.data.images ? node.data.images.map((img, idx) => (
@@ -2736,17 +2738,18 @@ export const MediaContent: React.FC<NodeContentContext> = (ctx) => {
                 <SceneDirectorOverlay 
                     visible={true} 
                     videoRef={mediaRef as React.RefObject<HTMLVideoElement>} 
-                    onCrop={() => { 
-                        const vid = mediaRef.current as HTMLVideoElement; 
-                        if (vid) { 
-                            const canvas = document.createElement('canvas'); 
-                            canvas.width = vid.videoWidth; 
-                            canvas.height = vid.videoHeight; 
-                            const ctx = canvas.getContext('2d'); 
-                            if (ctx) { 
-                                ctx.drawImage(vid, 0, 0); 
-                                onCrop?.(node.id, canvas.toDataURL('image/png')); 
-                            } 
+                    onCrop={async () => {
+                        const vid = mediaRef.current as HTMLVideoElement;
+                        if (vid) {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = vid.videoWidth;
+                            canvas.height = vid.videoHeight;
+                            const ctx = canvas.getContext('2d');
+                            if (ctx) {
+                                ctx.drawImage(vid, 0, 0);
+                                const url = await uploadMediaToServer(canvas.toDataURL('image/png'), { nodeId: node.id, type: 'image' });
+                                onCrop?.(node.id, url);
+                            }
                         }
                     }} 
                     onTimeHover={() => {}} 

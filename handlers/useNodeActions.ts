@@ -13,6 +13,8 @@ import { getUserPriority, ModelCategory, getDefaultModel, getUserDefaultModel } 
 import { getGridConfig, STORYBOARD_RESOLUTIONS } from '../services/storyboardConfig';
 import { saveImageNodeOutput, saveVideoNodeOutput, saveAudioNodeOutput, saveStoryboardGridOutput } from '../utils/storageHelper';
 import { checkImageNodeCache, checkVideoNodeCache, checkAudioNodeCache } from '../utils/cacheChecker';
+import { uploadMediaToServer, uploadMultipleMedia } from '../services/mediaStorageService';
+import { notifyError } from '../stores/notification.store';
 import { createNodeQuery } from '../hooks/usePerformanceOptimization';
 
 interface UseNodeActionsParams {
@@ -346,7 +348,9 @@ export function useNodeActions(params: UseNodeActionsParams) {
                     setNodes(p => p.map(n => n.id === id ? { ...n, status: NodeStatus.SUCCESS } : n));
                   } catch (error: any) {
                     console.error('[SORA_VIDEO_GENERATOR] Failed to regenerate prompt:', error);
-                    setNodes(p => p.map(n => n.id === id ? { ...n, status: NodeStatus.ERROR, data: { ...n.data, error: error.message } } : n));
+                    const errMsg = typeof error === 'string' ? error : (error?.message || String(error));
+                    setNodes(p => p.map(n => n.id === id ? { ...n, status: NodeStatus.ERROR, data: { ...n.data, error: errMsg } } : n));
+                    notifyError(`${node.title || 'Sora视频'} 提示词生成失败`, errMsg);
                   }
                   return;
               }
@@ -621,6 +625,7 @@ export function useNodeActions(params: UseNodeActionsParams) {
                     setConnections(prev => [...prev.filter(c => c.to !== childNodeId), newConnection]);
                     handleNodeUpdate(id, { taskGroups: updatedTaskGroups });
                     setNodes(p => p.map(n => n.id === id ? { ...n, status: NodeStatus.ERROR } : n));
+                    notifyError(`${node.title || 'Sora视频'} 视频生成失败`, errorMessage);
                   }
                   return;
               }
@@ -654,34 +659,11 @@ export function useNodeActions(params: UseNodeActionsParams) {
                       );
 
 
-                      // 导入OSS服务
-                      const { getOSSConfig } = await import('../services/soraConfigService');
-                      const { uploadFileToOSS } = await import('../services/ossService');
-
-                      // 检查是否配置了OSS
-                      const ossConfig = getOSSConfig();
-                      if (!ossConfig) {
-                          console.warn('[SORA_VIDEO_GENERATOR] OSS未配置，融合图将使用Base64格式，可能导致显示问题');
-                      }
-
-                      // 更新任务组数据（如果配置了OSS，先上传）
+                      // 上传融合图到服务端
                       const updatedTaskGroups = await Promise.all(taskGroups.map(async (tg) => {
                           const result = fusionResults.find(r => r.groupId === tg.id);
                           if (result) {
-                              let imageUrl = result.fusedImage;
-
-                              // 如果配置了OSS，上传融合图
-                              if (ossConfig) {
-                                  try {
-                                      const fileName = `sora-reference-${tg.id}-${Date.now()}.png`;
-                                      imageUrl = await uploadFileToOSS(result.fusedImage, fileName, ossConfig);
-                                  } catch (error: any) {
-                                      console.error('[SORA_VIDEO_GENERATOR] Failed to upload reference image for task group', tg.taskNumber, ':', error);
-                                      // 上传失败，回退到Base64
-                                      imageUrl = result.fusedImage;
-                                  }
-                              }
-
+                              const imageUrl = await uploadMediaToServer(result.fusedImage, { nodeId: id, type: 'image' });
                               return {
                                   ...tg,
                                   referenceImage: imageUrl,
@@ -823,6 +805,7 @@ export function useNodeActions(params: UseNodeActionsParams) {
                                   violationReason: result.violationReason,
                                   rawData: result._rawData
                               });
+                              notifyError(`任务组 ${tg.taskNumber} 视频生成失败`, errorMessage);
                           }
 
                           return {
@@ -918,6 +901,7 @@ export function useNodeActions(params: UseNodeActionsParams) {
                                       violationReason: result.violationReason,
                                       rawData: result._rawData
                                   });
+                                  notifyError(`任务组 ${tg.taskNumber} 重新生成失败`, errorMessage);
                               }
 
                               return {
@@ -1035,13 +1019,13 @@ export function useNodeActions(params: UseNodeActionsParams) {
                   let requestBody: any = { task_id: soraTaskId };
 
                   if (provider === 'yunwu') {
-                      apiUrl = 'http://localhost:3001/api/yunwuapi/status';
+                      apiUrl = 'http://localhost:3002/api/yunwuapi/status';
                       requestBody = { task_id: soraTaskId, model: 'sora-2-all' };
                   } else if (provider === 'sutu') {
-                      apiUrl = 'http://localhost:3001/api/sutu/query';
+                      apiUrl = 'http://localhost:3002/api/sutu/query';
                       requestBody = { id: soraTaskId };
                   } else if (provider === 'yijiapi') {
-                      apiUrl = `http://localhost:3001/api/yijiapi/query/${encodeURIComponent(soraTaskId)}`;
+                      apiUrl = `http://localhost:3002/api/yijiapi/query/${encodeURIComponent(soraTaskId)}`;
                       requestBody = null;
                   } else {
                       throw new Error('不支持的provider');
@@ -1074,7 +1058,8 @@ export function useNodeActions(params: UseNodeActionsParams) {
                       newStatus = data.status;
                       newProgress = data.progress || 0;
                       if (newStatus === 'error' || newStatus === 'failed') {
-                          newViolationReason = data.error || '视频生成失败';
+                          const rawErr = data.error || '视频生成失败';
+                          newViolationReason = typeof rawErr === 'string' ? rawErr : (rawErr?.message || JSON.stringify(rawErr));
                       }
                   } else if (provider === 'sutu') {
                       newVideoUrl = data.data?.remote_url || data.data?.video_url;
@@ -1100,6 +1085,7 @@ export function useNodeActions(params: UseNodeActionsParams) {
                   } else if (newViolationReason) {
                       updateData.violationReason = newViolationReason;
                       updateData.status = NodeStatus.ERROR;
+                      notifyError(`${node.title || 'Sora子任务'} 生成失败`, newViolationReason);
                   }
 
                   handleNodeUpdate(id, updateData);
@@ -1268,27 +1254,12 @@ export function useNodeActions(params: UseNodeActionsParams) {
                       // Handle image fusion (if exists)
                       let referenceImageUrl: string | undefined;
                       if (node.data.fusedImage) {
-
                           handleNodeUpdate(id, { progress: 10 });
-
-                          // Import OSS service
-                          const { uploadFileToOSS } = await import('../services/ossService');
-                          const { getOSSConfig } = await import('../services/soraConfigService');
-
-                          const ossConfig = getOSSConfig();
-                          if (ossConfig) {
-                              const fileName = `storyboard-fusion-${node.id}-${Date.now()}.png`;
-                              referenceImageUrl = await uploadFileToOSS(node.data.fusedImage, fileName, ossConfig);
-
-                              handleNodeUpdate(id, {
-                                  fusedImageUrl: referenceImageUrl,
-                                  progress: 20
-                              });
-
-                          } else {
-                              console.warn('[STORYBOARD_VIDEO_GENERATOR] No OSS config, using base64 data URL');
-                              referenceImageUrl = node.data.fusedImage;
-                          }
+                          referenceImageUrl = await uploadMediaToServer(node.data.fusedImage, { nodeId: id, type: 'image' });
+                          handleNodeUpdate(id, {
+                              fusedImageUrl: referenceImageUrl,
+                              progress: 20
+                          });
                       }
 
                       // Get API key
@@ -1441,31 +1412,16 @@ export function useNodeActions(params: UseNodeActionsParams) {
                       // Handle image fusion (if exists)
                       let referenceImageUrl: string | undefined;
                       if (node.data.fusedImage) {
-
                           handleNodeUpdate(id, { progress: 10 });
-
-                          // Import OSS service
-                          const { uploadFileToOSS } = await import('../services/ossService');
-                          const { getOSSConfig } = await import('../services/soraConfigService');
-
-                          const ossConfig = getOSSConfig();
-                          if (ossConfig) {
-                              // Check if already uploaded
-                              if (node.data.fusedImageUrl) {
-                                  referenceImageUrl = node.data.fusedImageUrl;
-                              } else {
-                                  const fileName = `storyboard-fusion-${node.id}-${Date.now()}.png`;
-                                  referenceImageUrl = await uploadFileToOSS(node.data.fusedImage, fileName, ossConfig);
-
-                                  handleNodeUpdate(id, {
-                                      fusedImageUrl: referenceImageUrl,
-                                      progress: 20
-                                  });
-
-                              }
+                          // 如果已有上传过的 URL，复用
+                          if (node.data.fusedImageUrl && !node.data.fusedImageUrl.startsWith('data:')) {
+                              referenceImageUrl = node.data.fusedImageUrl;
                           } else {
-                              console.warn('[STORYBOARD_VIDEO_GENERATOR] No OSS config, using base64 data URL');
-                              referenceImageUrl = node.data.fusedImage;
+                              referenceImageUrl = await uploadMediaToServer(node.data.fusedImage, { nodeId: id, type: 'image' });
+                              handleNodeUpdate(id, {
+                                  fusedImageUrl: referenceImageUrl,
+                                  progress: 20
+                              });
                           }
                       }
 
@@ -1797,6 +1753,7 @@ export function useNodeActions(params: UseNodeActionsParams) {
                       } catch (e: any) {
                           const idx = newGeneratedChars.findIndex(c => c.name === name);
                           newGeneratedChars[idx] = { ...newGeneratedChars[idx], status: 'ERROR', error: e.message };
+                          notifyError(`角色「${name}」生成失败`, e.message || String(e));
                       }
                       // SUPPORTING_ROLE 分支不走 handleCharacterActionNew，需要手动更新
                       handleNodeUpdate(id, { generatedCharacters: [...newGeneratedChars] });
@@ -1844,6 +1801,7 @@ export function useNodeActions(params: UseNodeActionsParams) {
                           if (idx >= 0) {
                               newGeneratedChars[idx] = { ...newGeneratedChars[idx], status: 'ERROR', error: e?.message || String(e) };
                           }
+                          notifyError(`角色「${name}」生成失败`, e?.message || String(e));
                       }
                   }
 
@@ -2064,9 +2022,12 @@ export function useNodeActions(params: UseNodeActionsParams) {
                                try {
                                    const { generateImageFromText } = await import('../services/geminiService');
                                    const res = await generateImageFromText(n.data.prompt!, getUserDefaultModel('image'), inputImages, { aspectRatio: n.data.aspectRatio, resolution: n.data.resolution, count: 1 });
-                                   handleNodeUpdate(n.id, { image: res[0], images: res, status: NodeStatus.SUCCESS });
+                                   const uploadedImages = await uploadMultipleMedia(res, { nodeId: n.id, type: 'image' });
+                                   handleNodeUpdate(n.id, { image: uploadedImages[0], images: uploadedImages, status: NodeStatus.SUCCESS });
                                } catch (e: any) {
-                                   handleNodeUpdate(n.id, { error: e.message, status: NodeStatus.ERROR });
+                                   const errMsg = typeof e === 'string' ? e : (e?.message || String(e));
+                                   handleNodeUpdate(n.id, { error: errMsg, status: NodeStatus.ERROR });
+                                   notifyError(`分镜图片生成失败`, errMsg);
                                }
                           });
                           return; 
@@ -2077,9 +2038,10 @@ export function useNodeActions(params: UseNodeActionsParams) {
                // ✅ 检查缓存
                const cachedImages = await checkImageNodeCache(id);
                if (cachedImages && cachedImages.length > 0) {
+                   const uploadedCached = await uploadMultipleMedia(cachedImages, { nodeId: id, type: 'image' });
                    handleNodeUpdate(id, {
-                       image: cachedImages[0],
-                       images: cachedImages,
+                       image: uploadedCached[0],
+                       images: uploadedCached,
                        status: NodeStatus.SUCCESS,
                        isCached: true,
                        cacheLocation: 'filesystem'
@@ -2094,13 +2056,12 @@ export function useNodeActions(params: UseNodeActionsParams) {
                       { aspectRatio: node.data.aspectRatio || '16:9', resolution: node.data.resolution, count: node.data.imageCount },
                       { nodeId: id, nodeType: node.type }
                   );
+                  const uploadedRes = await uploadMultipleMedia(res, { nodeId: id, type: 'image' });
                   handleNodeUpdate(id, {
-                      image: res[0],
-                      images: res,
+                      image: uploadedRes[0],
+                      images: uploadedRes,
                       isCached: false
                   });
-                  // Save to local storage
-                  await saveImageNodeOutput(id, res, 'IMAGE_GENERATOR');
                }
 
           } else if (node.type === NodeType.VIDEO_GENERATOR) {
@@ -2115,10 +2076,11 @@ export function useNodeActions(params: UseNodeActionsParams) {
               // ✅ 检查缓存
               const cachedVideo = await checkVideoNodeCache(id);
               if (cachedVideo) {
+                  const uploadedVideo = await uploadMediaToServer(cachedVideo, { nodeId: id, type: 'video' });
                   handleNodeUpdate(id, {
-                      videoUri: cachedVideo,
+                      videoUri: uploadedVideo,
                       videoMetadata: node.data.videoMetadata,
-                      videoUris: [cachedVideo],
+                      videoUris: [uploadedVideo],
                       status: NodeStatus.SUCCESS,
                       isCached: true,
                       cacheLocation: 'filesystem'
@@ -2141,8 +2103,9 @@ export function useNodeActions(params: UseNodeActionsParams) {
                       { nodeId: id, nodeType: node.type }
                   );
                   if (res.isFallbackImage) {
+                       const uploadedFallback = await uploadMediaToServer(res.uri, { nodeId: id, type: 'image' });
                        handleNodeUpdate(id, {
-                           image: res.uri,
+                           image: uploadedFallback,
                            videoUri: undefined,
                            videoMetadata: undefined,
                            error: "Region restricted: Generated preview image instead.",
@@ -2150,15 +2113,14 @@ export function useNodeActions(params: UseNodeActionsParams) {
                            isCached: false
                        });
                   } else {
+                       const uploadedUri = await uploadMediaToServer(res.uri, { nodeId: id, type: 'video' });
+                       const uploadedUris = res.uris ? await uploadMultipleMedia(res.uris, { nodeId: id, type: 'video' }) : [uploadedUri];
                        handleNodeUpdate(id, {
-                           videoUri: res.uri,
+                           videoUri: uploadedUri,
                            videoMetadata: res.videoMetadata,
-                           videoUris: res.uris,
+                           videoUris: uploadedUris,
                            isCached: false
                        });
-                       // Save to local storage
-                       const videoUris = res.uris || [res.uri];
-                       await saveVideoNodeOutput(id, videoUris, 'VIDEO_GENERATOR');
                   }
               }
 
@@ -2171,8 +2133,9 @@ export function useNodeActions(params: UseNodeActionsParams) {
               // ✅ 检查缓存
               const cachedAudio = await checkAudioNodeCache(id);
               if (cachedAudio) {
+                  const uploadedAudio = await uploadMediaToServer(cachedAudio, { nodeId: id, type: 'audio' });
                   handleNodeUpdate(id, {
-                      audioUri: cachedAudio,
+                      audioUri: uploadedAudio,
                       status: NodeStatus.SUCCESS,
                       isCached: true,
                       cacheLocation: 'filesystem'
@@ -2181,12 +2144,11 @@ export function useNodeActions(params: UseNodeActionsParams) {
                   // ❌ 没有缓存，调用 API
                   const { generateAudio } = await import('../services/geminiService');
                   const audioUri = await generateAudio(finalPrompt, node.data.model);
+                  const uploadedAudioUri = await uploadMediaToServer(audioUri, { nodeId: id, type: 'audio' });
                   handleNodeUpdate(id, {
-                      audioUri: audioUri,
+                      audioUri: uploadedAudioUri,
                       isCached: false
                   });
-                  // Save to local storage
-                  await saveAudioNodeOutput(id, audioUri, 'AUDIO_GENERATOR');
               }
 
           } else if (node.type === NodeType.STORYBOARD_GENERATOR) {
@@ -2226,7 +2188,8 @@ export function useNodeActions(params: UseNodeActionsParams) {
                       const { generateImageFromText } = await import('../services/geminiService');
                       const imgs = await generateImageFromText(visualPrompt, getUserDefaultModel('image'), [], { aspectRatio: node.data.aspectRatio || '16:9', count: 1 });
                       if (imgs && imgs.length > 0) {
-                          updatedShots[shotIndex] = { ...shot, imageUrl: imgs[0] };
+                          const uploadedImg = await uploadMediaToServer(imgs[0], { nodeId: id, type: 'image' });
+                          updatedShots[shotIndex] = { ...shot, imageUrl: uploadedImg };
                           handleNodeUpdate(id, { storyboardShots: [...updatedShots] });
                       }
                   } catch (e) {
@@ -2735,20 +2698,20 @@ Everything else must be purely visual with no text whatsoever.
                       const updatedGrids = [...existingGrids];
                       updatedGrids[targetPageIndex] = regeneratedImage;
 
+                      // Upload all grids to server
+                      const uploadedGrids = await uploadMultipleMedia(updatedGrids, { nodeId: id, type: 'image' });
+
                       handleNodeUpdate(id, {
-                          storyboardGridImages: updatedGrids,
-                          storyboardGridImage: updatedGrids[0],
+                          storyboardGridImages: uploadedGrids,
+                          storyboardGridImage: uploadedGrids[0],
                           storyboardGridType: gridType,
                           storyboardPanelOrientation: panelOrientation,
                           storyboardCurrentPage: targetPageIndex,
-                          storyboardTotalPages: updatedGrids.length,
+                          storyboardTotalPages: uploadedGrids.length,
                           storyboardShots: extractedShots,
                           storyboardRegeneratePanel: undefined, // Clear both flags
                           storyboardRegeneratePanel: undefined
                       });
-
-                      // Save to local storage
-                      await saveStoryboardGridOutput(id, updatedGrids, 'STORYBOARD_IMAGE');
 
                   } else {
                       throw new Error("分镜重新生成失败，请重试");
@@ -2783,22 +2746,20 @@ Everything else must be purely visual with no text whatsoever.
                       throw new Error("分镜图生成失败，请重试");
                   }
 
-                  // Save results
+                  // Upload grids to server, then save results
+                  const uploadedGeneratedGrids = await uploadMultipleMedia(generatedGrids, { nodeId: id, type: 'image' });
                   handleNodeUpdate(id, {
-                      storyboardGridImages: generatedGrids,
-                      storyboardGridImage: generatedGrids[0], // For backward compatibility
+                      storyboardGridImages: uploadedGeneratedGrids,
+                      storyboardGridImage: uploadedGeneratedGrids[0], // For backward compatibility
                       storyboardGridType: gridType,
                       storyboardPanelOrientation: panelOrientation,
                       storyboardCurrentPage: 0,
-                      storyboardTotalPages: generatedGrids.length,
+                      storyboardTotalPages: uploadedGeneratedGrids.length,
                       storyboardShots: extractedShots // Save shots data for editing
                   });
 
-                  // Save to local storage
-                  await saveStoryboardGridOutput(id, generatedGrids, 'STORYBOARD_IMAGE');
-
                   // 添加到历史记录
-                  generatedGrids.forEach((gridUrl, index) => {
+                  uploadedGeneratedGrids.forEach((gridUrl, index) => {
                       handleAssetGenerated('image', gridUrl, `分镜图 第${index + 1}页`);
                   });
 
@@ -2934,15 +2895,21 @@ Everything else must be purely visual with no text whatsoever.
              const img = node.data.image || inputImages[0];
              const { editImageWithText } = await import('../services/geminiService');
              const res = await editImageWithText(img, finalPrompt, node.data.model);
-             handleNodeUpdate(id, { image: res });
+             const uploadedEditedImage = await uploadMediaToServer(res, { nodeId: id, type: 'image' });
+             handleNodeUpdate(id, { image: uploadedEditedImage });
           }
           setNodes(p => p.map(n => n.id === id ? { ...n, status: NodeStatus.SUCCESS } : n));
       } catch (e: any) {
           console.error('[handleNodeAction] Error caught:', e);
           console.error('[handleNodeAction] Error message:', e.message);
           console.error('[handleNodeAction] Error stack:', e.stack);
-          handleNodeUpdate(id, { error: e.message });
+          const errMsg = typeof e === 'string' ? e : (e?.message || String(e));
+          handleNodeUpdate(id, { error: errMsg });
           setNodes(p => p.map(n => n.id === id ? { ...n, status: NodeStatus.ERROR } : n));
+          notifyError(
+            `${node.title || node.type || '节点'} 生成失败`,
+            errMsg
+          );
       }
   }, [handleNodeUpdate]);
 

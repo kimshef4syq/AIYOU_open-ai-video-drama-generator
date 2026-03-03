@@ -54,7 +54,7 @@ export class KlingVideoProvider implements VideoProvider {
     };
 
     // 使用后端代理
-    const apiUrl = 'http://localhost:3001/api/kling/create';
+    const apiUrl = 'http://localhost:3002/api/kling/create';
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
@@ -92,7 +92,7 @@ export class KlingVideoProvider implements VideoProvider {
     onProgress?: (progress: number) => void,
     context?: VideoProviderContext
   ): Promise<VideoGenerationResult> {
-    const apiUrl = `http://localhost:3001/api/kling/query?id=${encodeURIComponent(taskId)}`;
+    const apiUrl = `http://localhost:3002/api/kling/query?id=${encodeURIComponent(taskId)}`;
     const response = await fetch(apiUrl, {
       method: 'GET',
       headers: {
